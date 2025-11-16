@@ -1,4 +1,4 @@
-// copyStrategy.ts - CORREGIDO: Anti-recompra que funciona correctamente (TypeScript)
+// copyStrategy.ts - ANTI-RECOMPRA + Salida dinámica (TypeScript)
 
 import { Redis as RedisClass } from 'ioredis';
 import type { Redis as RedisClient } from 'ioredis';
@@ -402,76 +402,49 @@ export class CopyStrategy {
         ((maxPrice - entryPrice) / entryPrice) * 100;
       const holdTime = (Date.now() - entryTime) / 1000;
 
-      // 🔥 EXTRA ESTILO "BOT MILLONARIO":
-      // Si en muy poco tiempo (p.ej. < 2 min) el trade se dispara
-      // a un múltiplo muy alto del take profit configurado, salimos YA.
-      // Ejemplo: TP 30%, spike a +90% en 1 minuto => cobramos.
-      const EARLY_SPIKE_WINDOW_SECONDS = 120; // 2 minutos
-      const EARLY_SPIKE_MULTIPLIER = 3;       // 3x el TP configurado
-
-      if (
-        this.takeProfitEnabled &&
-        holdTime <= EARLY_SPIKE_WINDOW_SECONDS &&
-        pnlPercent >= this.takeProfitPercent * EARLY_SPIKE_MULTIPLIER
-      ) {
-        console.log(
-          `\n🚀 ${position.symbol || 'COPY'}: EARLY SPIKE TAKE PROFIT`,
-        );
-        console.log(
-          `   Hold: ${holdTime.toFixed(
-            0,
-          )}s (<= ${EARLY_SPIKE_WINDOW_SECONDS}s)`,
-        );
-        console.log(
-          `   PnL: +${pnlPercent.toFixed(2)}% (TP base: +${
-            this.takeProfitPercent
-          }%, spike ≥ ${EARLY_SPIKE_MULTIPLIER}x)`,
-        );
-        console.log(
-          `   Max reached: +${maxPnlPercent.toFixed(2)}%`,
-        );
-
-        return {
-          exit: true,
-          reason: 'take_profit',
-          pnl: pnlPercent,
-          description: `Early spike take profit: +${pnlPercent.toFixed(
-            2,
-          )}% (>= ${EARLY_SPIKE_MULTIPLIER}x TP in ${holdTime.toFixed(
-            0,
-          )}s)`,
-          exitType: 'automatic',
-          priority: 0,
-        };
-      }
-
-      // PRIORIDAD 1: 💰 TAKE PROFIT
+      // PRIORIDAD 1: 💰 TAKE PROFIT (con lógica ligeramente dinámica)
       if (this.takeProfitEnabled && pnlPercent >= this.takeProfitPercent) {
-        console.log(
-          `\n💰 ${
-            position.symbol || 'COPY'
-          }: TAKE PROFIT TRIGGERED`,
-        );
-        console.log(
-          `   Current: +${pnlPercent.toFixed(
-            2,
-          )}% (target: +${this.takeProfitPercent}%)`,
-        );
-        console.log(
-          `   Max reached: +${maxPnlPercent.toFixed(2)}%`,
-        );
-        console.log(`   Hold time: ${holdTime.toFixed(0)}s`);
+        // 🔧 Dinámica simple:
+        // - Si es muy temprano (< 60s) y el movimiento aún no es un mega-pump,
+        //   preferimos NO vender aquí y dejar que el trailing stop gestione la salida.
+        const isVeryEarly = holdTime < 60;
+        const strongPump = maxPnlPercent >= this.takeProfitPercent * 2;
 
-        return {
-          exit: true,
-          reason: 'take_profit',
-          pnl: pnlPercent,
-          description: `Take profit: +${pnlPercent.toFixed(
-            2,
-          )}% (target: +${this.takeProfitPercent}%)`,
-          exitType: 'automatic',
-          priority: 1,
-        };
+        if (!isVeryEarly || strongPump) {
+          console.log(
+            `\n💰 ${
+              position.symbol || 'COPY'
+            }: TAKE PROFIT TRIGGERED`,
+          );
+          console.log(
+            `   Current: +${pnlPercent.toFixed(
+              2,
+            )}% (target: +${this.takeProfitPercent}%)`,
+          );
+          console.log(
+            `   Max reached: +${maxPnlPercent.toFixed(2)}%`,
+          );
+          console.log(`   Hold time: ${holdTime.toFixed(0)}s`);
+
+          return {
+            exit: true,
+            reason: 'take_profit',
+            pnl: pnlPercent,
+            description: `Take profit: +${pnlPercent.toFixed(
+              2,
+            )}% (target: +${this.takeProfitPercent}%)`,
+            exitType: 'automatic',
+            priority: 1,
+          };
+        } else {
+          // muy temprano y aún no es un pump gigante:
+          // dejamos correr y que se encargue el trailing stop
+          console.log(
+            `\n⏳ ${
+              position.symbol || 'COPY'
+            }: TP condition met but very early, letting trailing manage it`,
+          );
+        }
       }
 
       // PRIORIDAD 2: 📉 TRAILING STOP
