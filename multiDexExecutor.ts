@@ -1,5 +1,5 @@
 // multiDexExecutor.ts - Router entre Pump.fun (14 cuentas) y Jupiter, en TypeScript
-// Usa PumpFunExecutor (IDL nueva con 14 cuentas) y OptimizedJupiterExecutor para Jupiter.
+// Usa PumpFunExecutor (IDL nueva con 14 cuentas) y JupiterSdkExecutor (Ultra Swap API) para Jupiter.
 
 import {
   Connection,
@@ -32,12 +32,12 @@ import {
   type SellResult as PumpSellResult,
 } from './pumpFunExecutor.js';
 
-// Jupiter executor optimizado (VersionedTransaction, decimales correctos, etc.)
+// Jupiter executor basado en Ultra Swap API (Lite API) / SDK
 import {
-  OptimizedJupiterExecutor,
+  JupiterSdkExecutor,
   type BuyResult as JupiterBuyResult,
   type SellResult as JupiterSellResult,
-} from './optimizedJupiterExecutor.js';
+} from './jupiterSdkExecutor.js';
 
 // --- Tipos de resultado expuestos por MultiDex ---
 
@@ -85,7 +85,7 @@ export class MultiDexExecutor {
   private readonly wallet: Keypair;
   private readonly dryRun: boolean;
   private readonly pumpExecutor: PumpFunExecutor;
-  private readonly jupiterExecutor: OptimizedJupiterExecutor;
+  private readonly jupiterExecutor: JupiterSdkExecutor;
   private readonly priorityFee: number;
   private readonly PUMP_PROGRAM_ID: PublicKey;
   private readonly redis: RedisClient;
@@ -128,8 +128,8 @@ export class MultiDexExecutor {
     this.PUMP_PROGRAM_ID = PUMP_PROGRAM_ID;
     this.pumpExecutor = new PumpFunExecutor(privateKey, rpcUrl, dryRun);
 
-    // Jupiter optimizado
-    this.jupiterExecutor = new OptimizedJupiterExecutor(
+    // Jupiter via Ultra Swap API v1 (Lite API)
+    this.jupiterExecutor = new JupiterSdkExecutor(
       privateKey,
       rpcUrl,
       dryRun,
@@ -295,7 +295,7 @@ export class MultiDexExecutor {
     }
   }
 
-  // -------- PATH Jupiter (delegado a OptimizedJupiterExecutor) --------
+  // -------- PATH Jupiter (delegado a JupiterSdkExecutor) --------
 
   private async buyOnJupiter(
     mint: string,
@@ -303,7 +303,7 @@ export class MultiDexExecutor {
     slippage: number,
   ): Promise<BuyResult> {
     try {
-      // OptimizedJupiterExecutor.buyToken espera (mint, amount, slippage?)
+      // JupiterSdkExecutor.buyToken espera (mint, amount, slippage?)
       const res: JupiterBuyResult = await this.jupiterExecutor.buyToken(
         mint,
         solAmount,
@@ -328,7 +328,7 @@ export class MultiDexExecutor {
     slippage: number,
   ): Promise<SellResult> {
     try {
-      // OptimizedJupiterExecutor.sellToken espera (mint, amount, slippage?)
+      // JupiterSdkExecutor.sellToken espera (mint, amount, slippage?)
       const res: JupiterSellResult = await this.jupiterExecutor.sellToken(
         mint,
         tokenAmount,
