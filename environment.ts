@@ -7,7 +7,10 @@ function normalize(value?: string | null): string {
   return (value ?? '').trim().toLowerCase();
 }
 
-export function parseBooleanEnv(value?: string | null, defaultValue = false): boolean {
+export function parseBooleanEnv(
+  value?: string | null,
+  defaultValue = false,
+): boolean {
   const normalized = normalize(value);
   if (!normalized) {
     return defaultValue;
@@ -21,7 +24,10 @@ export function parseBooleanEnv(value?: string | null, defaultValue = false): bo
   return defaultValue;
 }
 
-export function parseNumberEnv(value?: string | null, defaultValue = 0): number {
+export function parseNumberEnv(
+  value?: string | null,
+  defaultValue = 0,
+): number {
   const normalized = (value ?? '').trim();
   if (!normalized) {
     return defaultValue;
@@ -30,7 +36,10 @@ export function parseNumberEnv(value?: string | null, defaultValue = 0): number 
   return Number.isFinite(parsed) ? parsed : defaultValue;
 }
 
-export function parseIntegerEnv(value?: string | null, defaultValue = 0): number {
+export function parseIntegerEnv(
+  value?: string | null,
+  defaultValue = 0,
+): number {
   const normalized = (value ?? '').trim();
   if (!normalized) {
     return defaultValue;
@@ -44,25 +53,35 @@ export function isDryRunEnabled(): boolean {
 }
 
 export const DRY_RUN_ENABLED = isDryRunEnabled();
+
 export const FORCE_CLOUDFLARE_DNS = parseBooleanEnv(
   process.env.FORCE_CLOUDFLARE_DNS,
   false,
 );
-export const USE_WEBHOOKS = parseBooleanEnv(process.env.USE_WEBHOOKS, false);
+
+export const USE_WEBHOOKS = parseBooleanEnv(
+  process.env.USE_WEBHOOKS,
+  false,
+);
+
 export const JUPITER_SLIPPAGE_PCT = parseNumberEnv(
   process.env.JUPITER_SLIPPAGE_PCT,
   0.15,
 );
+
 export const PUMP_BUY_SLIPPAGE_PCT = parseNumberEnv(
   process.env.PUMP_BUY_SLIPPAGE_PCT,
   0.15,
 );
+
 export const PUMP_SELL_SLIPPAGE_PCT = parseNumberEnv(
   process.env.PUMP_SELL_SLIPPAGE_PCT,
   0.15,
 );
+
+// OJO: aquí usamos GRADUATION_MIN_PROFIT_PERCENT (como en envCleaner + GraduationHandler)
 export const GRADUATION_MIN_PROFIT_PERCENT = parseNumberEnv(
-  process.env.GRADUATION_MIN_PROFIT,
+  process.env.GRADUATION_MIN_PROFIT_PERCENT,
   0,
 );
 
@@ -70,62 +89,81 @@ export const ENABLE_AUTO_TRADING = parseBooleanEnv(
   process.env.ENABLE_AUTO_TRADING,
   false,
 );
+
 export const TELEGRAM_LIVE_UPDATES_ENABLED = parseBooleanEnv(
   process.env.TELEGRAM_LIVE_UPDATES,
   true,
 );
+
 export const POSITION_SIZE_SOL = parseNumberEnv(
   process.env.POSITION_SIZE_SOL,
   0.1,
 );
+
+// Aquí ya usamos COPY_MIN_WALLETS_* (matching envCleaner + copyMonitor)
 export const COPY_MIN_WALLETS_TO_BUY = parseIntegerEnv(
-  process.env.MIN_WALLETS_TO_BUY,
+  process.env.COPY_MIN_WALLETS_TO_BUY,
   1,
 );
+
 export const COPY_MIN_WALLETS_TO_SELL = parseIntegerEnv(
-  process.env.MIN_WALLETS_TO_SELL,
+  process.env.COPY_MIN_WALLETS_TO_SELL,
   1,
 );
+
 export const COPY_PROFIT_TARGET_ENABLED = parseBooleanEnv(
   process.env.COPY_PROFIT_TARGET_ENABLED,
   true,
 );
+
+// Matching envCleaner: COPY_PROFIT_TARGET_PERCENT
 export const COPY_PROFIT_TARGET_PERCENT = parseNumberEnv(
-  process.env.COPY_PROFIT_TARGET,
-  25,
+  process.env.COPY_PROFIT_TARGET_PERCENT,
+  30,
 );
+
 export const TRAILING_STOP_ENABLED = parseBooleanEnv(
   process.env.TRAILING_STOP_ENABLED,
   true,
 );
+
+// Matching envCleaner: TRAILING_STOP_PERCENT
 export const TRAILING_STOP_PERCENT = parseNumberEnv(
-  process.env.TRAILING_STOP,
-  12,
+  process.env.TRAILING_STOP_PERCENT,
+  15,
 );
+
 export const COPY_STOP_LOSS_ENABLED = parseBooleanEnv(
   process.env.COPY_STOP_LOSS_ENABLED,
   true,
 );
+
+// Matching envCleaner: COPY_STOP_LOSS_PERCENT
 export const COPY_STOP_LOSS_PERCENT = parseNumberEnv(
-  process.env.COPY_STOP_LOSS,
-  15,
+  process.env.COPY_STOP_LOSS_PERCENT,
+  13,
 );
+
 export const COPY_MAX_HOLD_ENABLED = parseBooleanEnv(
   process.env.COPY_MAX_HOLD_ENABLED,
   false,
 );
+
 export const COPY_MAX_HOLD_SECONDS = parseIntegerEnv(
   process.env.COPY_MAX_HOLD,
   240,
 );
+
 export const COPY_COOLDOWN_SECONDS = parseIntegerEnv(
   process.env.COPY_COOLDOWN,
   60,
 );
+
 export const BLOCK_REBUYS_ENABLED = parseBooleanEnv(
   process.env.BLOCK_REBUYS,
   true,
 );
+
 export const REBUY_WINDOW_SECONDS = parseIntegerEnv(
   process.env.REBUY_WINDOW,
   300,
@@ -134,7 +172,7 @@ export const REBUY_WINDOW_SECONDS = parseIntegerEnv(
 // Tamaño de entrada para el bot tipo "millón"
 export const ENTRY_SIZE_SOL = parseNumberEnv(
   process.env.ENTRY_SIZE_SOL,
-  POSITION_SIZE_SOL, // valor por defecto: lo que ya usabas
+  POSITION_SIZE_SOL,
 );
 
 // Estrategia adaptativa (TP dinámico + trailing stops + tiempo)
@@ -160,10 +198,12 @@ export const TOKEN_AGE_LIMIT_SECONDS = parseIntegerEnv(
   process.env.TOKEN_AGE_LIMIT_SECONDS,
   180,
 );
+
 export const EARLY_EXIT_TIME_SEC = parseIntegerEnv(
   process.env.EARLY_EXIT_TIME_SEC,
   180,
 );
+
 export const MIN_BUY_VOLUME_SOL = parseNumberEnv(
   process.env.MIN_BUY_VOLUME_SOL,
   0,
@@ -174,6 +214,7 @@ export const LOG_TO_FILE = parseBooleanEnv(
   process.env.LOG_TO_FILE,
   true,
 );
+
 export const LOG_DIRECTORY = process.env.LOG_DIRECTORY ?? './logs';
 
 // Reporte diario (hora México)
@@ -181,6 +222,7 @@ export const DAILY_REPORT_ENABLED = parseBooleanEnv(
   process.env.DAILY_REPORT_ENABLED,
   true,
 );
+
 export const DAILY_REPORT_HOUR_MX = parseIntegerEnv(
   process.env.DAILY_REPORT_HOUR_MX,
   22,
