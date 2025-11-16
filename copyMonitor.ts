@@ -24,7 +24,7 @@ import {
 
 // En vez de usar PumpFunExecutor directo, usamos MultiDexExecutor que ya maneja:
 // - Pump.fun 14 cuentas
-// - Jupiter optimizado
+// - Jupiter (Ultra Swap vía JupiterSdkExecutor)
 // - BLOQUEO de venta en Pump.fun si el token está graduado
 import {
   MultiDexExecutor,
@@ -135,7 +135,7 @@ let positionManager: PositionManager | null = null;
 //
 // AHORA: siempre intentamos crear un MultiDexExecutor, que internamente:
 // - Usa PumpFunExecutor (14 accounts + creator fee) para Pump.fun
-// - Usa OptimizedJupiterExecutor para Jupiter
+// - Usa JupiterSdkExecutor (Ultra Swap API) para Jupiter
 // - Bloquea venta en Pump.fun cuando el token está graduado
 //
 if (ENABLE_TRADING) {
@@ -162,7 +162,7 @@ if (ENABLE_TRADING) {
       console.log(`   Position Size (legacy): ${POSITION_SIZE_SOL} SOL`);
       console.log('   🎯 HYBRID exit strategy active');
       console.log(
-        '   ✅ Pump.fun 14 accounts + Jupiter + graduation-safe sells\n',
+        '   ✅ Pump.fun 14 accounts + Jupiter (Ultra) + graduation-safe sells\n',
       );
     } catch (error: any) {
       console.error('⚠️ Trading init failed:', error?.message ?? String(error));
@@ -774,6 +774,13 @@ async function monitorOpenPositions(): Promise<void> {
             currentPrice,
           );
         }
+
+        // 🔁 Nuevo: actualizar también lastPrice / maxPnlPercent / minPnlPercent
+        await positionManager.updatePositionOnPrice(
+          position.mint,
+          currentPrice,
+          pnlPercent,
+        );
 
         const now = Date.now();
         const lastUpd = lastUpdate[position.mint] || 0;
