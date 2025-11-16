@@ -1,0 +1,106 @@
+// jupiterClient.ts - Wrapper del SDK oficial de Jupiter (Swap API v1)
+
+import { createJupiterApiClient } from '@jup-ag/api';
+import { PublicKey, VersionedTransaction } from '@solana/web3.js';
+import { safeParseNumber } from './safeNumberUtils.js';
+
+const LITE_API_BASE = 'https://lite-api.jup.ag'; // host free plan
+const SOL_MINT = 'So11111111111111111111111111111111111111112';
+
+const jupiter = createJupiterApiClient({
+  basePath: `${LITE_API_BASE}/swap/v1`,
+  // headers: { 'X-API-KEY': process.env.JUPITER_API_KEY ?? '' }, // si algún día pagas pro
+});
+
+export interface JupiterQuoteParams {
+  inputMint: string;
+  outputMint: string;
+  amount: bigint | number;
+  slippage: number; // ej. 0.03 = 3%
+}
+
+export interface JupiterSwapResult {
+  transaction: VersionedTransaction;
+  // puedes extender esto si quieres más datos
+}
+
+/**
+ * Obtiene una quote usando el SDK (@jup-ag/api).
+ */
+export async function getJupiterQuote(params: JupiterQuoteParams) {
+  const { inputMint, outputMint } = params;
+
+  const slippagePct = safeParseNumber(params.slippage, 0.03);
+  const slippageBps = Math.floor(slippagePct * 10_000);
+
+  const amountBigInt =
+    typeof params.amount === 'bigint'
+      ? params.amount
+      : BigInt(Math.floor(params.amount));
+
+  const quote = await jupiter.quoteGet({
+    inputMint,
+    outputMint,
+    amount: amountBigInt.toString(),
+    slippageBps,
+    onlyDirectRoutes: false,
+  });
+
+  return quote;
+}
+
+/**
+ * Construye la tx de swap lista para firmar y enviar.
+ * Usa el response de quoteGet y la publicKey del usuario.
+ */
+export async function buildJupiterSwapTx(params: {
+  quoteResponse: any;
+  userPublicKey: PublicKey;
+}) {
+  const { quoteResponse, userPublicKey } = params;
+
+  const swapRes = await jupiter.swapPost({
+    swapRequest: {
+      // El SDK espera los campos de la quote tal cual los devolvió quoteGet
+      quoteResponse,
+      userPublicKey: userPublicKey.toBase58(),
+      wrapAndUnwrapSol: true,
+      dynamicComputeUnitLimit: true,
+      prioritizationFeeLamports: undefined, // lo controlas tú con PRIORITY_FEE_MICROLAMPORTS
+    },
+  });
+
+  const txBase64 = swapRes.swapTransaction;
+  const txBuffer = Buffer.from(txBase64, 'base64');
+  const tx = VersionedTransaction.deserialize(txBuffer);
+
+  return {
+    transaction: tx,
+  } as JupiterSwapResult;
+}
+
+/**
+ * Helper rápido para swap token -> SOL (cuando el token ya está graduado).
+ */
+export async function getQuoteTokenToSol(params: {
+  mint: string;
+  uiAmount: number;
+  decimals: number;
+  slippage: number;
+}) {
+  const { mint, uiAmount, decimals, slippage } = params;
+
+  const safeUiAmount = safeParseNumber(uiAmount, NaN);
+  if (!Number.isFinite(safeUiAmount) || safeUiAmount <= 0) {
+    throw new Error('Invalid uiAmount');
+  }
+
+  const rawAmount = BigInt(Math.round(safeUiAmount * 10 ** decimals));
+
+  return getJupiterQuote({
+    inputMint: mint,
+    outputMint: SOL_MINT,
+    amount: rawAmount,
+    slippage,
+  });
+}
