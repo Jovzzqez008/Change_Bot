@@ -1,6 +1,5 @@
 // copyMonitor.ts - HYBRID smart copy trading monitor (TypeScript, aligned with MultiDexExecutor)
 
-import { GraduationHandler } from './graduationHandler.js';
 import { Redis as RedisClass } from 'ioredis';
 import type { Redis as RedisClient } from 'ioredis';
 import { CopyStrategy } from './copyStrategy.js';
@@ -10,7 +9,7 @@ import {
   PublicKey,
   ParsedTransactionWithMeta,
 } from '@solana/web3.js';
-import { getPriceService, PriceService } from './priceService.js';
+import { getPriceService, type PriceService } from './priceService.js';
 import {
   isDryRunEnabled,
   ENABLE_AUTO_TRADING,
@@ -112,8 +111,6 @@ type TradeExecutor = {
 
 // --- Instancias base ---
 
-const graduationHandler = new GraduationHandler();
-
 const redis: RedisClient = new RedisClass(process.env.REDIS_URL as string, {
   maxRetriesPerRequest: null,
 });
@@ -185,10 +182,12 @@ async function calculateCurrentValue(
   tokenAmount: number,
 ): Promise<ValueData | null> {
   try {
-    return (await priceService.calculateCurrentValue(
-      mint,
-      tokenAmount,
-    )) as ValueData;
+    const data = await priceService.calculateCurrentValue(mint, tokenAmount);
+    if (!data) return null;
+    return {
+      marketPrice: data.marketPrice,
+      solValue: data.solValue,
+    };
   } catch (error: any) {
     console.error('   ❌ Error calculating value:', error?.message ?? String(error));
     return null;
@@ -1093,7 +1092,7 @@ async function executeSell(
   }
 }
 
-// ✅ sendPnLUpdate (igual que antes)
+// ✅ sendPnLUpdate
 
 async function sendPnLUpdate(
   position: Position,
