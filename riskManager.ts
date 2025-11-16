@@ -3,9 +3,9 @@
 import { Redis as RedisClass } from 'ioredis';
 import type { Redis as RedisClient } from 'ioredis';
 import { safeParseNumber, safeDivide } from './safeNumberUtils.js';
-import { DRY_RUN_ENABLED } from './environment.js';
+import { isDryRunEnabled } from './environment.js';
 
-const DRY_RUN_MODE = DRY_RUN_ENABLED;
+const DRY_RUN_MODE = isDryRunEnabled();
 
 interface DailyStats {
   date: string;
