@@ -520,13 +520,20 @@ async function processCopySignals(): Promise<void> {
         );
 
         if (buyResult.success) {
+          const tokensReceived = buyResult.tokensReceived ?? 0;
+
+          if (tokensReceived <= 0) {
+            console.log(
+              '   ⚠️ Buy marked as success pero tokensReceived es 0/undefined, NO se abre posición\n',
+            );
+            continue;
+          }
+
           const mode = DRY_RUN ? '📄 PAPER' : '💰 LIVE';
           console.log(
-            `${mode} BUY EXECUTED on ${
-              buyResult.dex ?? 'Unknown DEX'
-            }`,
+            `${mode} BUY EXECUTED on ${buyResult.dex ?? 'Unknown DEX'}`,
           );
-          console.log(`   Tokens: ${buyResult.tokensReceived}`);
+          console.log(`   Tokens: ${tokensReceived}`);
           console.log(`   Signature: ${buyResult.signature}\n`);
 
           await positionManager.openPosition(
@@ -534,8 +541,8 @@ async function processCopySignals(): Promise<void> {
             'COPY',
             currentPrice,
             decision.amount,
-            buyResult.tokensReceived,
-            buyResult.signature,
+            tokensReceived,
+            buyResult.signature ?? 'UNKNOWN_SIGNATURE',
           );
 
           await redis.hset(`position:${copySignal.mint}`, {
