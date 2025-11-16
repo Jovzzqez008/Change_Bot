@@ -6,7 +6,7 @@ import type { Redis as RedisClient } from 'ioredis';
 import type { Options as RequestOptions } from 'request';
 import { getPriceService } from './priceService.js';
 import type { PriceData } from './priceService.js';
-import { isDryRunEnabled, POSITION_SIZE_SOL } from './environment.js';
+import { isDryRunEnabled, POSITION_SIZE_SOL, MAX_POSITIONS } from './environment.js';
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const OWNER_CHAT_ID = process.env.TELEGRAM_OWNER_CHAT_ID;
@@ -160,9 +160,9 @@ export async function initTelegram(): Promise<void> {
             );
 
             if (priceData && priceData.price !== null) {
-              const pnlPerSol =
+              const pnlSol =
                 ((priceData.price - entryPrice) / entryPrice) * solAmount;
-              totalPnL += pnlPerSol;
+              totalPnL += pnlSol;
             }
           }
         }
@@ -172,7 +172,7 @@ export async function initTelegram(): Promise<void> {
           '📊 Status\n\n' +
             `Mode: ${mode}\n` +
             `Tracked Wallets: ${trackedWallets}\n` +
-            `Open Positions: ${openPositions}/${process.env.MAX_POSITIONS || 2}\n` +
+            `Open Positions: ${openPositions}/${MAX_POSITIONS}\n` +
             `Pending Signals: ${pendingSignals}\n` +
             '\n' +
             `💰 Total P&L: ${totalPnL.toFixed(4)} SOL`,
