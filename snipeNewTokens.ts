@@ -1,7 +1,7 @@
 // snipeNewTokens.ts - SNIPER ALL NEW TOKENS (Pump.fun / PumpPortal)
 
 import 'dotenv/config';
-import WebSocket, { type RawData as WebSocketRawData } from 'ws';
+import WebSocket from 'ws';
 import { Redis as RedisClass } from 'ioredis';
 import type { Redis as RedisClient } from 'ioredis';
 import { PublicKey } from '@solana/web3.js';
@@ -136,7 +136,6 @@ function isLikelyPumpFunPool(evt: NewTokenEvent): boolean {
   const pool = evt.pool ?? (evt as any).bondingCurveKey ?? '';
   if (!pool) return false;
   try {
-    // Solo validamos que tenga pinta de PublicKey
     void new PublicKey(pool);
     return true;
   } catch {
@@ -264,8 +263,8 @@ async function handleNewToken(evt: NewTokenEvent): Promise<void> {
 
   registerSnipedToken();
 
+  // --- DRY RUN: solo simulación, sin on-chain ---
   if (DRY_RUN) {
-    // Solo simulación: registrar una posición "fantasma" en Redis
     const positionManager = new PositionManager(redis);
     const entryPriceData: PriceData = await priceService.getPrice(
       mint,
@@ -276,18 +275,20 @@ async function handleNewToken(evt: NewTokenEvent): Promise<void> {
     const fakeTokensAmount =
       entryPrice > 0 ? positionSizeSol / entryPrice : 0;
 
-    await positionManager.openPosition({
+    // ⚠️ openPosition en tu PositionManager espera 5–6 argumentos (no un objeto)
+    await positionManager.openPosition(
       mint,
-      symbol: evt.symbol ?? '',
-      strategy: 'sniper',
       entryPrice,
-      solAmount: positionSizeSol,
-      tokensAmount: fakeTokensAmount,
-      entryTime: Date.now(),
-      executedDex: 'Pump.fun',
-      originalSignature: evt.signature ?? '',
-      walletName: 'SNIPER',
-    });
+      positionSizeSol,
+      fakeTokensAmount,
+      'sniper',
+      {
+        executedDex: 'Pump.fun',
+        originalSignature: evt.signature ?? '',
+        walletName: 'SNIPER',
+        symbol: evt.symbol ?? '',
+      },
+    );
 
     console.log(
       `🧪 SNIPER DRY-RUN BUY: ${positionSizeSol} SOL on ${mint} @ ${entryPrice.toFixed(
@@ -310,6 +311,7 @@ async function handleNewToken(evt: NewTokenEvent): Promise<void> {
     return;
   }
 
+  // --- LIVE: ejecutar compra real vía MultiDexExecutor ---
   try {
     const executor = new MultiDexExecutor(
       process.env.PRIVATE_KEY as string,
@@ -331,23 +333,22 @@ async function handleNewToken(evt: NewTokenEvent): Promise<void> {
     }
 
     const positionManager = new PositionManager(redis);
-    const entryPrice =
-      buyResult.effectivePrice ?? buyResult.price ?? 0;
-    const tokensAmount =
-      buyResult.tokensAmount ?? buyResult.tokensOut ?? 0;
+    const entryPrice = buyResult.effectivePrice ?? 0;
+    const tokensAmount = buyResult.tokensAmount ?? 0;
 
-    await positionManager.openPosition({
+    await positionManager.openPosition(
       mint,
-      symbol: evt.symbol ?? '',
-      strategy: 'sniper',
       entryPrice,
-      solAmount: positionSizeSol,
+      positionSizeSol,
       tokensAmount,
-      entryTime: Date.now(),
-      executedDex: buyResult.executedDex ?? 'Pump.fun',
-      originalSignature: buyResult.signature ?? evt.signature ?? '',
-      walletName: 'SNIPER',
-    });
+      'sniper',
+      {
+        executedDex: buyResult.executedDex ?? 'Pump.fun',
+        originalSignature: buyResult.signature ?? evt.signature ?? '',
+        walletName: 'SNIPER',
+        symbol: evt.symbol ?? '',
+      },
+    );
 
     console.log(
       `💸 SNIPER BUY EXECUTED: ${positionSizeSol} SOL on ${mint} @ ${entryPrice.toFixed(
@@ -394,10 +395,10 @@ function createSniperWebSocket(): WebSocket {
     socket.send(JSON.stringify(msg));
   });
 
-  socket.on('message', async (data: WebSocketRawData) => {
+  socket.on('message', async (data: WebSocket.Data) => {
     try {
       const text =
-        typeof data === 'string' ? data : data.toString('utf8');
+        typeof data === 'string' ? data : data.toString();
       const parsed = JSON.parse(text);
 
       // Normalizar el mensaje del WS (PumpPortal usa campos en PascalCase)
