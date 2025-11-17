@@ -63,21 +63,46 @@ function normalizeNewTokenEvent(raw: any): NewTokenEvent {
     raw.CreatedAt ??
     raw.blockTime ??
     raw.BlockTime ??
+    raw.launchTimestamp ??
+    raw.launchTime ??
+    raw.firstSeen ??
+    raw.created_at ??
     null;
 
   return {
-    mint: raw.mint ?? raw.Mint ?? raw.tokenMint ?? raw.TokenMint ?? '',
+    mint:
+      raw.mint ??
+      raw.Mint ??
+      raw.tokenMint ??
+      raw.TokenMint ??
+      raw.mintAddress ??
+      raw.address ??
+      '',
     signature: raw.signature ?? raw.Signature ?? raw.sig ?? '',
     traderPublicKey:
-      raw.traderPublicKey ?? raw.TraderPublicKey ?? raw.owner ?? raw.Owner ?? '',
+      raw.traderPublicKey ??
+      raw.TraderPublicKey ??
+      raw.owner ??
+      raw.Owner ??
+      '',
     txType: raw.txType ?? raw.TxType ?? raw.type ?? '',
     initialBuy: raw.initialBuy ?? raw.InitialBuy ?? 0,
-    solAmount: raw.solAmount ?? raw.SolAmount ?? 0,
+    solAmount:
+      raw.solAmount ??
+      raw.SolAmount ??
+      raw.sol_in ??
+      raw.solIn ??
+      0,
     vTokensInBondingCurve:
       raw.vTokensInBondingCurve ?? raw.VTokensInBondingCurve ?? 0,
     vSolInBondingCurve:
       raw.vSolInBondingCurve ?? raw.VSolInBondingCurve ?? 0,
-    marketCapSol: raw.marketCapSol ?? raw.MarketCapSol ?? 0,
+    marketCapSol:
+      raw.marketCapSol ??
+      raw.MarketCapSol ??
+      raw.marketCap ??
+      raw.market_cap ??
+      0,
     name: raw.name ?? raw.Name ?? '',
     symbol: raw.symbol ?? raw.Symbol ?? '',
     uri: raw.uri ?? raw.Uri ?? '',
@@ -86,6 +111,7 @@ function normalizeNewTokenEvent(raw: any): NewTokenEvent {
       raw.Pool ??
       raw.bondingCurveKey ??
       raw.BondingCurveKey ??
+      raw.bondingCurve ??
       '',
     createdAt,
   };
@@ -96,10 +122,10 @@ function normalizeNewTokenEvent(raw: any): NewTokenEvent {
 function getTokenAgeSeconds(evt: NewTokenEvent): number {
   const createdAt =
     evt.createdAt ??
-    (typeof evt as any).launchTimestamp ??
-    (typeof evt as any).firstSeen ??
-    (typeof evt as any).created_at ??
-    (typeof evt as any).launchTime ??
+    (evt as any).launchTimestamp ??
+    (evt as any).firstSeen ??
+    (evt as any).created_at ??
+    (evt as any).launchTime ??
     null;
 
   if (!createdAt) return 0;
@@ -124,6 +150,7 @@ function getInitialVolumeSol(evt: NewTokenEvent): number {
     evt.solAmount ??
     (evt as any).SolAmount ??
     (evt as any).sol_in ??
+    (evt as any).solIn ??
     0;
 
   if (mcap && Number.isFinite(mcap)) return mcap;
@@ -132,7 +159,11 @@ function getInitialVolumeSol(evt: NewTokenEvent): number {
 }
 
 function isLikelyPumpFunPool(evt: NewTokenEvent): boolean {
-  const pool = evt.pool ?? (evt as any).bondingCurveKey ?? '';
+  const pool =
+    evt.pool ??
+    (evt as any).bondingCurveKey ??
+    (evt as any).bondingCurve ??
+    '';
   if (!pool) return false;
   try {
     void new PublicKey(pool);
@@ -203,9 +234,14 @@ async function handleNewToken(evt: NewTokenEvent): Promise<void> {
   if (!SNIPE_NEW_TOKENS) return;
 
   const mint = evt.mint;
-  if (!mint) return;
+  if (!mint) {
+    console.log('⚠️ SNIPER: Event sin mint, ignorando');
+    return;
+  }
 
   if (!isLikelyPumpFunPool(evt)) {
+    // Pool no parece un bonding curve de Pump.fun
+    // console.log(`⚠️ SNIPER IGNORE (no Pump.fun pool): ${mint}`);
     return;
   }
 
@@ -274,11 +310,10 @@ async function handleNewToken(evt: NewTokenEvent): Promise<void> {
     const fakeTokensAmount =
       entryPrice > 0 ? positionSizeSol / entryPrice : 0;
 
-    // ✅ Mantener entryPrice como number
     await positionManager.registerOpenPosition({
       mint,
       strategy: 'sniper',
-      entryPrice,
+      entryPrice, // number
       solAmount: positionSizeSol,
       tokensAmount: fakeTokensAmount,
       executedDex: 'Pump.fun',
@@ -333,11 +368,10 @@ async function handleNewToken(evt: NewTokenEvent): Promise<void> {
     const entryPrice = buyResult.effectivePrice ?? 0;
     const tokensAmount = buyResult.tokensAmount ?? 0;
 
-    // ✅ Mantener entryPrice como number
     await positionManager.registerOpenPosition({
       mint,
       strategy: 'sniper',
-      entryPrice,
+      entryPrice, // number
       solAmount: positionSizeSol,
       tokensAmount,
       executedDex: buyResult.executedDex ?? 'Pump.fun',
@@ -396,12 +430,27 @@ function createSniperWebSocket(): WebSocket {
     try {
       const text =
         typeof data === 'string' ? data : data.toString();
+
+      // 👇 DEBUG: loguear TODO lo que llega del WS
+      console.log('📡 SNIPER WS RAW:', text);
+
       const parsed = JSON.parse(text);
 
-      const raw = parsed.token ?? parsed.data ?? parsed;
+      // 👇 DEBUG: ver qué campos trae realmente
+      console.log('📡 SNIPER WS PARSED:', parsed);
+
+      const raw =
+        (parsed as any).token ??
+        (parsed as any).data ??
+        parsed;
+
       const evt = normalizeNewTokenEvent(raw);
 
+      // 👇 DEBUG: ver el evento normalizado
+      console.log('📡 SNIPER NORMALIZED EVENT:', evt);
+
       if (!evt.mint) {
+        console.log('⚠️ SNIPER EVENT WITHOUT MINT, SKIP');
         return;
       }
 
@@ -442,17 +491,22 @@ export async function startSniperMode(): Promise<void> {
   }
 
   if (!redis) {
+    console.log('✅ SNIPER Redis client created');
     redis = new RedisClass(process.env.REDIS_URL as string, {
       maxRetriesPerRequest: null,
-      // Para que no truene si el stream aún no está listo
-      enableOfflineQueue: true,
+      enableOfflineQueue: false,
     });
 
-    redis.on('error', (err: any) => {
-      console.log('⚠️ SNIPER Redis error:', err?.message ?? String(err));
-    });
-
-    console.log('✅ SNIPER Redis client created');
+    try {
+      await redis.ping();
+      console.log('✅ SNIPER Redis connected');
+    } catch (error: any) {
+      console.log(
+        '❌ SNIPER: Redis ping failed:',
+        error?.message ?? String(error),
+      );
+      return;
+    }
   }
 
   const cfg: SniperConfig = {
@@ -470,9 +524,9 @@ export async function startSniperMode(): Promise<void> {
   console.log(
     `   TOKEN_AGE_LIMIT_SECONDS = ${cfg.tokenAgeLimitSeconds}`,
   );
-  console.log(`   MIN_BUY_VOLUME_SOL      = ${cfg.minBuyVolumeSol}`);
-  console.log(`   MAX_TOKENS_PER_HOUR     = ${cfg.maxTokensPerHour}`);
-  console.log(`   POSITION_SIZE_SOL       = ${cfg.positionSizeSol}`);
+  console.log(`   MIN_BUY_VOLUME_SOL     = ${cfg.minBuyVolumeSol}`);
+  console.log(`   MAX_TOKENS_PER_HOUR    = ${cfg.maxTokensPerHour}`);
+  console.log(`   POSITION_SIZE_SOL      = ${cfg.positionSizeSol}`);
 
   ws = createSniperWebSocket();
 }
