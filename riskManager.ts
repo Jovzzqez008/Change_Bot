@@ -82,6 +82,23 @@ export interface ClosedPosition {
   pnlPercent: string;
 }
 
+type RegisterOpenPositionInput = {
+  mint: string;
+  strategy: string;
+  entryPrice: number;
+  solAmount: number;
+  tokensAmount: number;
+  buySignature?: string;
+  originalSignature?: string;
+  originalDex?: string;
+  walletName?: string;
+  walletSource?: string;
+  upvotes?: number;
+  executedDex?: string;
+  entryTime?: number;
+  [key: string]: unknown;
+};
+
 export class PositionManager {
   private readonly redis: RedisClient;
   private static readonly ESTIMATED_NETWORK_FEE_SOL = 5_000 / 1_000_000_000; // 5000 lamports ≈ 0.000005 SOL
@@ -105,39 +122,68 @@ export class PositionManager {
   }
 
   async registerOpenPosition(
-    mint: string,
-    strategy: string,
-    entryPrice: number,
-    solAmount: number,
-    tokensAmount: number,
-    buySignature?: string,
+    input:
+      | RegisterOpenPositionInput
+      | {
+          mint: string;
+          strategy: string;
+          entryPrice: number;
+          solAmount: number;
+          tokensAmount: number;
+          buySignature?: string;
+        },
   ): Promise<void> {
     const now = Date.now().toString();
 
+    const data: RegisterOpenPositionInput = {
+      ...input,
+      entryPrice: input.entryPrice,
+      solAmount: input.solAmount,
+      tokensAmount: input.tokensAmount,
+    } as RegisterOpenPositionInput;
+
+    if (!data.mint) {
+      throw new Error('registerOpenPosition: mint is required');
+    }
+    if (!data.strategy) {
+      throw new Error('registerOpenPosition: strategy is required');
+    }
+
     const position: Position = {
-      mint,
-      strategy,
-      entryPrice: entryPrice.toString(),
-      solAmount: solAmount.toString(),
-      tokensAmount: tokensAmount.toString(),
-      entryTime: now,
-      walletSource: '',
+      mint: data.mint,
+      strategy: data.strategy,
+      entryPrice: data.entryPrice.toString(),
+      solAmount: data.solAmount.toString(),
+      tokensAmount: data.tokensAmount.toString(),
+      entryTime: (data.entryTime ?? Number(now)).toString(),
+      walletSource: data.walletSource ? String(data.walletSource) : '',
+      walletName: data.walletName ? String(data.walletName) : undefined,
+      upvotes:
+        data.upvotes !== undefined ? String(Math.trunc(data.upvotes)) : undefined,
+      executedDex: data.executedDex ? String(data.executedDex) : undefined,
       status: 'open',
       // defaults para analíticas
       mode: DRY_RUN_MODE ? 'DRY' : 'LIVE',
-      entrySource: strategy || 'UNKNOWN',
+      entrySource: data.strategy || 'UNKNOWN',
       dex: undefined,
-      strategyTag: strategy,
-      symbol: mint,
+      strategyTag: data.strategy,
+      symbol: data.mint,
     };
 
-    if (buySignature) {
-      position.originalSignature = buySignature;
+    const signature =
+      data.buySignature ?? (typeof data.originalSignature === 'string'
+        ? data.originalSignature
+        : undefined);
+    if (signature) {
+      position.originalSignature = signature;
+    }
+    if (typeof data.originalDex === 'string') {
+      position.originalDex = data.originalDex;
     }
 
-    await this.redis.sadd('open_positions', mint);
+    await this.redis.sadd('open_positions', data.mint);
     await this.redis.hset(
-      `position:${mint}`,
+      `position:${data.mint}`,
       Object.entries(position).reduce<Record<string, string>>((acc, [k, v]) => {
         if (v !== undefined && v !== null) {
           acc[k] = String(v);
@@ -156,14 +202,26 @@ export class PositionManager {
     tokensAmount: number,
     buySignature?: string,
   ): Promise<void> {
-    await this.registerOpenPosition(
+    await this.registerOpenPosition({
       mint,
       strategy,
       entryPrice,
       solAmount,
       tokensAmount,
       buySignature,
-    );
+    });
+  }
+
+  async getPosition(mint: string): Promise<Position | null> {
+    const exists = await this.redis.sismember('open_positions', mint);
+    if (!exists) {
+      return null;
+    }
+    const data = await this.redis.hgetall(`position:${mint}`);
+    if (!data || Object.keys(data).length === 0) {
+      return null;
+    }
+    return { ...(data as unknown as Position), mint };
   }
 
   async getOpenPositions(): Promise<Position[]> {

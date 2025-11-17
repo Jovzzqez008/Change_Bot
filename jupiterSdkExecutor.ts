@@ -27,6 +27,9 @@ export interface BuyResult {
   dex: string; // 'Jupiter'
   error?: string;
   simulated?: boolean;
+  executedDex?: string;
+  tokensAmount?: number;
+  effectivePrice?: number;
 }
 
 export interface SellResult {
@@ -152,6 +155,10 @@ export class JupiterSdkExecutor {
         solSpent: safeSolAmount,
         tokensReceived,
         dex: 'Jupiter',
+        executedDex: 'Jupiter',
+        tokensAmount: tokensReceived,
+        effectivePrice:
+          tokensReceived > 0 ? safeSolAmount / tokensReceived : undefined,
       };
     } catch (error: any) {
       console.error(
@@ -253,6 +260,9 @@ export class JupiterSdkExecutor {
         solSpent: solAmount,
         dex: 'Jupiter',
         simulated: true,
+        executedDex: 'Jupiter',
+        tokensAmount: rawOut,
+        effectivePrice: rawOut > 0 ? solAmount / rawOut : undefined,
       };
     } catch (error: any) {
       return {

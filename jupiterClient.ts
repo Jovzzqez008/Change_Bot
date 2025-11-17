@@ -1,16 +1,55 @@
 // jupiterClient.ts - Wrapper del SDK oficial de Jupiter (Swap API v1)
 
-import { createJupiterApiClient } from '@jup-ag/api';
 import { PublicKey, VersionedTransaction } from '@solana/web3.js';
+import fetch, { type RequestInit } from 'node-fetch';
 import { safeParseNumber } from './safeNumberUtils.js';
 
 const LITE_API_BASE = 'https://lite-api.jup.ag'; // host free plan
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 
-const jupiter = createJupiterApiClient({
-  basePath: `${LITE_API_BASE}/swap/v1`,
-  // headers: { 'X-API-KEY': process.env.JUPITER_API_KEY ?? '' }, // si algún día pagas pro
-});
+interface LiteApiClient {
+  quoteGet(params: Record<string, unknown>): Promise<any>;
+  swapPost(body: { swapRequest: Record<string, unknown> }): Promise<any>;
+}
+
+function createLiteApiClient(basePath: string): LiteApiClient {
+  const normalizedBase = basePath.replace(/\/$/, '');
+
+  async function request<T>(
+    path: string,
+    init?: RequestInit,
+  ): Promise<T> {
+    const url = path.startsWith('http') ? path : `${normalizedBase}${path}`;
+    const response = await fetch(url, init);
+    if (!response.ok) {
+      const text = await response.text().catch(() => response.statusText);
+      throw new Error(
+        `Jupiter Lite API error (${response.status} ${response.statusText}): ${text}`,
+      );
+    }
+    return (await response.json()) as T;
+  }
+
+  return {
+    async quoteGet(params: Record<string, unknown>) {
+      const url = new URL(`${normalizedBase}/quote`);
+      for (const [key, value] of Object.entries(params)) {
+        if (value === undefined || value === null) continue;
+        url.searchParams.append(key, String(value));
+      }
+      return request(url.toString());
+    },
+    async swapPost(body: { swapRequest: Record<string, unknown> }) {
+      return request(`${normalizedBase}/swap`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    },
+  };
+}
+
+const jupiter = createLiteApiClient(`${LITE_API_BASE}/swap/v1`);
 
 export interface JupiterQuoteParams {
   inputMint: string;

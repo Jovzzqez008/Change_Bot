@@ -57,6 +57,7 @@ interface CopyDecision {
 
 interface ExitDecision {
   exit: boolean;
+  shouldExit?: boolean;
   reason?: string;
   pnl?: number;
   description?: string;
@@ -67,6 +68,20 @@ interface ExitDecision {
   holdTime?: string;
   status?: 'holding';
   [key: string]: unknown;
+}
+
+interface CopyStrategyDependencies {
+  redis?: RedisClient;
+  positionManager?: unknown;
+  priceService?: unknown;
+}
+
+function isRedisInstance(candidate: unknown): candidate is RedisClient {
+  return (
+    typeof candidate === 'object' &&
+    candidate !== null &&
+    typeof (candidate as RedisClient).duplicate === 'function'
+  );
 }
 
 // --- Redis compartido / helper ---
@@ -86,6 +101,7 @@ const sharedRedis: RedisClient = createRedisClient();
 // --- Clase principal ---
 
 export class CopyStrategy {
+  private readonly redis: RedisClient;
   private readonly minWalletsToBuy: number;
   private readonly minWalletsToSell: number;
 
@@ -107,7 +123,15 @@ export class CopyStrategy {
   private readonly blockRebuys: boolean;
   private readonly rebuyWindow: number;
 
-  constructor(private readonly redis: RedisClient = sharedRedis) {
+  constructor(redisOrDeps: RedisClient | CopyStrategyDependencies = sharedRedis) {
+    if (isRedisInstance(redisOrDeps)) {
+      this.redis = redisOrDeps;
+    } else if (redisOrDeps && typeof redisOrDeps === 'object') {
+      this.redis = redisOrDeps.redis ?? sharedRedis;
+    } else {
+      this.redis = sharedRedis;
+    }
+
     this.minWalletsToBuy = COPY_MIN_WALLETS_TO_BUY;
     this.minWalletsToSell = COPY_MIN_WALLETS_TO_SELL;
 
@@ -388,16 +412,18 @@ export class CopyStrategy {
   async shouldExit(
     position: Position,
     currentPrice: number,
+    pnlOverride?: number,
+    _currentSolValue?: number,
   ): Promise<ExitDecision> {
     try {
       const entryPrice = parseFloat(position.entryPrice);
-      const maxPrice = parseFloat(
-        position.maxPrice || position.entryPrice,
-      );
+      const maxPrice = parseFloat(position.maxPrice || position.entryPrice);
       const entryTime = parseInt(position.entryTime, 10);
 
       const pnlPercent =
-        ((currentPrice - entryPrice) / entryPrice) * 100;
+        typeof pnlOverride === 'number'
+          ? pnlOverride
+          : ((currentPrice - entryPrice) / entryPrice) * 100;
       const maxPnlPercent =
         ((maxPrice - entryPrice) / entryPrice) * 100;
       const holdTime = (Date.now() - entryTime) / 1000;
@@ -428,6 +454,7 @@ export class CopyStrategy {
 
           return {
             exit: true,
+            shouldExit: true,
             reason: 'take_profit',
             pnl: pnlPercent,
             description: `Take profit: +${pnlPercent.toFixed(
@@ -449,43 +476,30 @@ export class CopyStrategy {
 
       // PRIORIDAD 2: 📉 TRAILING STOP
       if (this.trailingStopEnabled && maxPnlPercent > 0) {
-        const trailingPrice =
-          maxPrice * (1 - this.trailingStopPercent / 100);
-        const dropFromMax =
-          ((maxPrice - currentPrice) / maxPrice) * 100;
+        const trailingDecision = this.evaluateTrailingStop(
+          position,
+          currentPrice,
+          pnlPercent,
+          maxPrice,
+        );
 
-        if (currentPrice <= trailingPrice) {
+        if (trailingDecision.shouldExit) {
           console.log(
             `\n📉 ${
               position.symbol || 'COPY'
             }: TRAILING STOP TRIGGERED`,
           );
           console.log(
-            `   Max: $${maxPrice.toFixed(
-              10,
-            )} (+${maxPnlPercent.toFixed(2)}%)`,
-          );
-          console.log(
-            `   Current: $${currentPrice.toFixed(
-              10,
-            )} (+${pnlPercent.toFixed(2)}%)`,
-          );
-          console.log(
-            `   Drop from max: -${dropFromMax.toFixed(
-              2,
-            )}% (limit: -${this.trailingStopPercent}%)`,
-          );
-          console.log(
-            `   Protecting profit: +${pnlPercent.toFixed(2)}%`,
+            trailingDecision.description ??
+              `   Protecting profit: +${pnlPercent.toFixed(2)}%`,
           );
 
           return {
             exit: true,
+            shouldExit: true,
             reason: 'trailing_stop',
             pnl: pnlPercent,
-            description: `Trailing stop: protecting +${pnlPercent.toFixed(
-              2,
-            )}% (was +${maxPnlPercent.toFixed(2)}%)`,
+            description: trailingDecision.description,
             exitType: 'automatic',
             priority: 2,
           };
@@ -510,6 +524,7 @@ export class CopyStrategy {
 
         return {
           exit: true,
+          shouldExit: true,
           reason: 'stop_loss',
           pnl: pnlPercent,
           description: `Stop loss: ${pnlPercent.toFixed(
@@ -541,6 +556,7 @@ export class CopyStrategy {
 
         return {
           exit: true,
+          shouldExit: true,
           reason: 'traders_sold',
           pnl: pnlPercent,
           sellCount,
@@ -571,6 +587,7 @@ export class CopyStrategy {
 
         return {
           exit: true,
+          shouldExit: true,
           reason: 'max_hold_time',
           pnl: pnlPercent,
           description: `Max hold time: ${holdTime.toFixed(
@@ -584,6 +601,7 @@ export class CopyStrategy {
       // ✅ CONTINUAR HOLDING
       return {
         exit: false,
+        shouldExit: false,
         pnl: pnlPercent,
         maxPnl: maxPnlPercent,
         holdTime: holdTime.toFixed(0),
@@ -592,7 +610,7 @@ export class CopyStrategy {
       };
     } catch (error: any) {
       console.error('❌ Error in shouldExit:', error?.message ?? error);
-      return { exit: false };
+      return { exit: false, shouldExit: false };
     }
   }
 
@@ -605,6 +623,48 @@ export class CopyStrategy {
     } catch {
       return 0;
     }
+  }
+
+  evaluateTrailingStop(
+    position: Position,
+    currentPrice: number,
+    pnlPercent: number,
+    maxPriceOverride?: number,
+  ): { shouldExit: boolean; description?: string } {
+    if (!this.trailingStopEnabled) {
+      return { shouldExit: false };
+    }
+
+    const entryPrice = parseFloat(position.entryPrice);
+    const maxPrice =
+      typeof maxPriceOverride === 'number'
+        ? maxPriceOverride
+        : parseFloat(position.maxPrice || position.entryPrice);
+
+    if (!Number.isFinite(entryPrice) || !Number.isFinite(maxPrice)) {
+      return { shouldExit: false };
+    }
+    if (entryPrice <= 0 || maxPrice <= 0 || currentPrice <= 0) {
+      return { shouldExit: false };
+    }
+
+    const trailingPrice = maxPrice * (1 - this.trailingStopPercent / 100);
+    if (currentPrice > trailingPrice) {
+      return { shouldExit: false };
+    }
+
+    const maxPnlPercent = ((maxPrice - entryPrice) / entryPrice) * 100;
+    const dropFromMax = ((maxPrice - currentPrice) / maxPrice) * 100;
+
+    const description = `   Max: $${maxPrice.toFixed(
+      10,
+    )} (+${maxPnlPercent.toFixed(2)}%)\n   Current: $${currentPrice.toFixed(
+      10,
+    )} (+${pnlPercent.toFixed(2)}%)\n   Drop from max: -${dropFromMax.toFixed(
+      2,
+    )}% (limit: -${this.trailingStopPercent}%)`;
+
+    return { shouldExit: true, description };
   }
 
   calculateConfidence(upvotes: number): number {
