@@ -274,12 +274,12 @@ async function handleNewToken(evt: NewTokenEvent): Promise<void> {
     const fakeTokensAmount =
       entryPrice > 0 ? positionSizeSol / entryPrice : 0;
 
-    // ⬇️ Convertimos números a string para respetar la firma de openPosition
+    // ✅ aquí ahora enviamos números, que es lo que espera openPosition
     await positionManager.openPosition(
       mint,
-      entryPrice.toString(),
-      positionSizeSol.toString(),
-      fakeTokensAmount.toString(),
+      entryPrice,
+      positionSizeSol,
+      fakeTokensAmount,
       'sniper',
       {
         executedDex: 'Pump.fun',
@@ -335,12 +335,12 @@ async function handleNewToken(evt: NewTokenEvent): Promise<void> {
     const entryPrice = buyResult.effectivePrice ?? 0;
     const tokensAmount = buyResult.tokensAmount ?? 0;
 
-    // ⬇️ Igual aquí: números → string
+    // ✅ también aquí: números
     await positionManager.openPosition(
       mint,
-      entryPrice.toString(),
-      positionSizeSol.toString(),
-      tokensAmount.toString(),
+      entryPrice,
+      positionSizeSol,
+      tokensAmount,
       'sniper',
       {
         executedDex: buyResult.executedDex ?? 'Pump.fun',
