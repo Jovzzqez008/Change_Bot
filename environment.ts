@@ -1,4 +1,3 @@
-// environment.ts - Helpers y configuración de entorno centralizada
 import dns from 'node:dns';
 
 const TRUTHY_VALUES = new Set(['1', 'true', 'yes', 'y', 'on', 'paper']);
@@ -8,7 +7,10 @@ function normalize(value?: string | null): string {
   return (value ?? '').trim().toLowerCase();
 }
 
-export function parseBooleanEnv(value?: string | null, defaultValue = false): boolean {
+export function parseBooleanEnv(
+  value?: string | null,
+  defaultValue = false,
+): boolean {
   const normalized = normalize(value);
   if (!normalized) {
     return defaultValue;
@@ -22,7 +24,10 @@ export function parseBooleanEnv(value?: string | null, defaultValue = false): bo
   return defaultValue;
 }
 
-export function parseNumberEnv(value?: string | null, defaultValue = 0): number {
+export function parseNumberEnv(
+  value?: string | null,
+  defaultValue = 0,
+): number {
   const normalized = (value ?? '').trim();
   if (!normalized) {
     return defaultValue;
@@ -31,87 +36,78 @@ export function parseNumberEnv(value?: string | null, defaultValue = 0): number 
   return Number.isFinite(parsed) ? parsed : defaultValue;
 }
 
-export function parseIntegerEnv(value?: string | null, defaultValue = 0): number {
-  const normalized = (value ?? '').trim();
-  if (!normalized) {
-    return defaultValue;
-  }
-  const parsed = Number.parseInt(normalized, 10);
-  return Number.isNaN(parsed) ? defaultValue : parsed;
+export function parseIntegerEnv(
+  value?: string | null,
+  defaultValue = 0,
+): number {
+  const n = parseNumberEnv(value, defaultValue);
+  return Number.isFinite(n) ? Math.trunc(n) : defaultValue;
 }
 
-export function isDryRunEnabled(): boolean {
-  return parseBooleanEnv(process.env.DRY_RUN, false);
-}
+//
+// EXPORTS
+//
 
-export const DRY_RUN_ENABLED = isDryRunEnabled();
-export const FORCE_CLOUDFLARE_DNS = parseBooleanEnv(
-  process.env.FORCE_CLOUDFLARE_DNS,
-  false,
-);
-export const USE_WEBHOOKS = parseBooleanEnv(process.env.USE_WEBHOOKS, false);
-
-export const JUPITER_SLIPPAGE_PCT = parseNumberEnv(
-  process.env.JUPITER_SLIPPAGE_PCT,
-  0.15,
-);
-export const PUMP_BUY_SLIPPAGE_PCT = parseNumberEnv(
-  process.env.PUMP_BUY_SLIPPAGE_PCT,
-  0.15,
-);
-export const PUMP_SELL_SLIPPAGE_PCT = parseNumberEnv(
-  process.env.PUMP_SELL_SLIPPAGE_PCT,
-  0.15,
-);
-
-export const GRADUATION_MIN_PROFIT_PERCENT = parseNumberEnv(
-  process.env.GRADUATION_MIN_PROFIT,
-  0,
-);
+export const isDryRunEnabled = () =>
+  parseBooleanEnv(process.env.DRY_RUN, true);
 
 export const ENABLE_AUTO_TRADING = parseBooleanEnv(
   process.env.ENABLE_AUTO_TRADING,
-  false,
-);
-
-export const TELEGRAM_LIVE_UPDATES_ENABLED = parseBooleanEnv(
-  process.env.TELEGRAM_LIVE_UPDATES,
   true,
 );
 
-export const POSITION_SIZE_SOL = parseNumberEnv(
-  process.env.POSITION_SIZE_SOL,
-  0.1,
+export const AUTO_SELL_ON_GRADUATION = parseBooleanEnv(
+  process.env.AUTO_SELL_ON_GRADUATION,
+  false,
 );
 
+//
+// COPY TRADING SETTINGS
+//
 export const COPY_MIN_WALLETS_TO_BUY = parseIntegerEnv(
-  process.env.MIN_WALLETS_TO_BUY,
+  process.env.COPY_MIN_WALLETS_TO_BUY,
   1,
 );
 
 export const COPY_MIN_WALLETS_TO_SELL = parseIntegerEnv(
-  process.env.MIN_WALLETS_TO_SELL,
+  process.env.COPY_MIN_WALLETS_TO_SELL,
   1,
 );
 
-export const COPY_PROFIT_TARGET_ENABLED = parseBooleanEnv(
-  process.env.COPY_PROFIT_TARGET_ENABLED,
-  true,
+export const COPY_BLOCK_REBUY_ENABLED = parseBooleanEnv(
+  process.env.COPY_BLOCK_REBUY_ENABLED,
+  false,
 );
 
+export const COPY_REBUY_COOLDOWN_SECONDS = parseIntegerEnv(
+  process.env.COPY_REBUY_COOLDOWN_SECONDS,
+  0,
+);
+
+export const COPY_SIGNAL_TTL_SECONDS = parseIntegerEnv(
+  process.env.COPY_SIGNAL_TTL_SECONDS,
+  600,
+);
+
+//
+// POSITION SIZE / RISK
+//
+export const POSITION_SIZE_SOL = parseNumberEnv(
+  process.env.POSITION_SIZE_SOL,
+  0.05,
+);
+
+export const MAX_POSITIONS = parseIntegerEnv(
+  process.env.MAX_POSITIONS,
+  2,
+);
+
+//
+// Profit targets & stops (copy strategy clásica)
+//
 export const COPY_PROFIT_TARGET_PERCENT = parseNumberEnv(
-  process.env.COPY_PROFIT_TARGET,
-  25,
-);
-
-export const TRAILING_STOP_ENABLED = parseBooleanEnv(
-  process.env.TRAILING_STOP_ENABLED,
-  true,
-);
-
-export const TRAILING_STOP_PERCENT = parseNumberEnv(
-  process.env.TRAILING_STOP,
-  12,
+  process.env.COPY_PROFIT_TARGET_PERCENT,
+  300,
 );
 
 export const COPY_STOP_LOSS_ENABLED = parseBooleanEnv(
@@ -120,149 +116,222 @@ export const COPY_STOP_LOSS_ENABLED = parseBooleanEnv(
 );
 
 export const COPY_STOP_LOSS_PERCENT = parseNumberEnv(
-  process.env.COPY_STOP_LOSS,
-  15,
+  process.env.COPY_STOP_LOSS_PERCENT,
+  13,
 );
 
-export const COPY_MAX_HOLD_ENABLED = parseBooleanEnv(
-  process.env.COPY_MAX_HOLD_ENABLED,
-  false,
-);
-
-export const COPY_MAX_HOLD_SECONDS = parseIntegerEnv(
-  process.env.COPY_MAX_HOLD,
-  240,
-);
-
-export const COPY_COOLDOWN_SECONDS = parseIntegerEnv(
-  process.env.COPY_COOLDOWN,
-  60,
-);
-
-export const BLOCK_REBUYS_ENABLED = parseBooleanEnv(
-  process.env.BLOCK_REBUYS,
+export const TRAILING_STOP_ENABLED = parseBooleanEnv(
+  process.env.TRAILING_STOP_ENABLED,
   true,
 );
 
-export const REBUY_WINDOW_SECONDS = parseIntegerEnv(
-  process.env.REBUY_WINDOW,
-  300,
+export const TRAILING_STOP_PERCENT = parseNumberEnv(
+  process.env.TRAILING_STOP_PERCENT,
+  15,
 );
 
-export const RPC_WEBSOCKET_URL = (() => {
-  const raw = (process.env.RPC_WEBSOCKET_URL ?? '').trim();
-  return raw.length > 0 ? raw : undefined;
-})();
-
-export const TELEGRAM_OWNER_CHAT_ID = (() => {
-  const raw = (process.env.TELEGRAM_OWNER_CHAT_ID ?? '').trim();
-  return raw.length > 0 ? raw : undefined;
-})();
-
-// 🌐 DNS (opcional Cloudflare)
-if (FORCE_CLOUDFLARE_DNS) {
-  try {
-    if (typeof dns.setDefaultResultOrder === 'function') {
-      dns.setDefaultResultOrder('ipv4first');
-    }
-    dns.setServers(['1.1.1.1', '1.0.0.1']);
-    console.log('☁️ FORCE_CLOUDFLARE_DNS enabled - using Cloudflare resolvers');
-  } catch (error: any) {
-    console.log(
-      '⚠️ Unable to apply FORCE_CLOUDFLARE_DNS setting:',
-      error?.message ?? String(error),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────
-// 🚀 Config avanzada: sniper, volumen, ventas parciales
-// ─────────────────────────────────────────────────────
-
-// Máximo de posiciones simultáneas (para /status y riskManager)
-export const MAX_POSITIONS = parseIntegerEnv(
-  process.env.MAX_POSITIONS,
-  2,
-);
-
-// Estrategia adaptativa tipo “bot de Reddit”
-export const ADAPTIVE_STRATEGY_ENABLED = parseBooleanEnv(
-  process.env.ADAPTIVE_STRATEGY,
-  false,
-);
-
-// 🔫 SNIPER: entrar a todos los nuevos tokens de Pump.fun
-export const SNIPE_NEW_TOKENS_ENABLED = parseBooleanEnv(
-  process.env.SNIPE_NEW_TOKENS,
-  false,
-);
-
-// Límite de tokens por hora (0 = sin límite duro, se usa solo para métricas)
-export const MAX_TOKENS_PER_HOUR = parseIntegerEnv(
-  process.env.MAX_TOKENS_PER_HOUR,
-  0,
-);
-
-// Edad máxima del token para considerarlo “nuevo” (segundos)
-export const TOKEN_AGE_LIMIT_SECONDS = parseIntegerEnv(
-  process.env.TOKEN_AGE_LIMIT_SECONDS,
-  180,
-);
-
-// Tiempo mínimo antes de empezar a aplicar salidas agresivas (segundos)
-export const EARLY_EXIT_TIME_SEC = parseIntegerEnv(
-  process.env.EARLY_EXIT_TIME_SEC,
-  180,
-);
-
-// Volumen mínimo en SOL para entrar en modo sniper (0 = sin filtro)
-export const MIN_BUY_VOLUME_SOL = parseNumberEnv(
-  process.env.MIN_BUY_VOLUME_SOL,
-  0,
-);
-
-// 📉 Exit por volumen seco
+// Volume-based exit (activity drying up)
 export const VOLUME_EXIT_ENABLED = parseBooleanEnv(
   process.env.VOLUME_EXIT_ENABLED,
   false,
 );
-
-// Ventana de lookback para comparar volúmenes (segundos)
-export const VOLUME_EXIT_LOOKBACK_SECONDS = parseIntegerEnv(
-  process.env.VOLUME_EXIT_LOOKBACK_SECONDS,
+export const VOLUME_DROP_PERCENT = parseNumberEnv(
+  process.env.VOLUME_DROP_PERCENT,
+  70,
+);
+export const VOLUME_WINDOW_SECONDS = parseIntegerEnv(
+  process.env.VOLUME_WINDOW_SECONDS,
+  60,
+);
+export const VOLUME_MIN_HOLD_SECONDS = parseIntegerEnv(
+  process.env.VOLUME_MIN_HOLD_SECONDS,
   60,
 );
 
-// Porcentaje de caída de volumen que dispara exit (ej. 70 = volumen actual < 30% del anterior)
-export const VOLUME_EXIT_DROP_PERCENT = parseNumberEnv(
-  process.env.VOLUME_EXIT_DROP_PERCENT,
-  70,
+// Partial take-profits
+export const PARTIAL_TP_ENABLED = parseBooleanEnv(
+  process.env.PARTIAL_TP_ENABLED,
+  false,
+);
+export const PARTIAL_TP1_PCT = parseNumberEnv(
+  process.env.PARTIAL_TP1_PCT,
+  100,
+);
+export const PARTIAL_TP1_SELL_PCT = parseNumberEnv(
+  process.env.PARTIAL_TP1_SELL_PCT,
+  25,
+);
+export const PARTIAL_TP2_PCT = parseNumberEnv(
+  process.env.PARTIAL_TP2_PCT,
+  200,
+);
+export const PARTIAL_TP2_SELL_PCT = parseNumberEnv(
+  process.env.PARTIAL_TP2_SELL_PCT,
+  25,
+);
+export const PARTIAL_TP3_PCT = parseNumberEnv(
+  process.env.PARTIAL_TP3_PCT,
+  400,
+);
+export const PARTIAL_TP3_SELL_PCT = parseNumberEnv(
+  process.env.PARTIAL_TP3_SELL_PCT,
+  50,
 );
 
-// 💰 Ventas parciales escalonadas
-export const PARTIAL_TAKE_PROFIT_ENABLED = parseBooleanEnv(
-  process.env.PARTIAL_TAKE_PROFIT_ENABLED,
+// Max hold time (cierre duro por tiempo)
+export const COPY_MAX_HOLD_ENABLED = parseBooleanEnv(
+  process.env.COPY_MAX_HOLD_ENABLED,
+  true,
+);
+export const COPY_MAX_HOLD_SECONDS = parseIntegerEnv(
+  process.env.COPY_MAX_HOLD_SECONDS,
+  3600,
+);
+
+//
+// SIMULATION & STATS
+//
+export const DAILY_STATS_ENABLED = parseBooleanEnv(
+  process.env.DAILY_STATS_ENABLED,
+  true,
+);
+
+//
+// TELEGRAM
+//
+export const TELEGRAM_LIVE_UPDATES_ENABLED = parseBooleanEnv(
+  process.env.TELEGRAM_LIVE_UPDATES_ENABLED,
+  true,
+);
+
+export const TELEGRAM_OWNER_CHAT_ID = process.env.TELEGRAM_OWNER_CHAT_ID ?? '';
+
+//
+// SNIPE NEW TOKENS / PUMP.FUN
+//
+export const SNIPE_NEW_TOKENS = parseBooleanEnv(
+  process.env.SNIPE_NEW_TOKENS,
   false,
 );
 
-// Nivel 1: vender X% de la posición al llegar a Y% de PnL
-export const PARTIAL_TP1_PERCENT = parseNumberEnv(
-  process.env.PARTIAL_TP1_PERCENT,
-  100, // +100% por defecto
+export const TOKEN_AGE_LIMIT_SECONDS = parseIntegerEnv(
+  process.env.TOKEN_AGE_LIMIT_SECONDS,
+  300,
 );
 
-export const PARTIAL_TP1_SIZE_PERCENT = parseNumberEnv(
-  process.env.PARTIAL_TP1_SIZE_PERCENT,
-  50, // vender 50% de la posición
+export const MIN_BUY_VOLUME_SOL = parseNumberEnv(
+  process.env.MIN_BUY_VOLUME_SOL,
+  0.2,
 );
 
-// Nivel 2: vender otro tramo más arriba
-export const PARTIAL_TP2_PERCENT = parseNumberEnv(
-  process.env.PARTIAL_TP2_PERCENT,
-  200, // +200% por defecto
+export const MAX_TOKENS_PER_HOUR = parseIntegerEnv(
+  process.env.MAX_TOKENS_PER_HOUR,
+  30,
 );
 
-export const PARTIAL_TP2_SIZE_PERCENT = parseNumberEnv(
-  process.env.PARTIAL_TP2_SIZE_PERCENT,
-  25, // vender 25% extra
+//
+// PUMP.FUN / JUPITER / RPC
+//
+export const RPC_URL = process.env.RPC_URL ?? '';
+
+export const PRIVATE_KEY = process.env.PRIVATE_KEY ?? '';
+
+export const PUMP_FUN_SLIPPAGE_BPS = parseIntegerEnv(
+  process.env.PUMP_FUN_SLIPPAGE_BPS,
+  500,
 );
+
+export const JUPITER_SLIPPAGE_BPS = parseIntegerEnv(
+  process.env.JUPITER_SLIPPAGE_BPS,
+  1000,
+);
+
+export const PRIORITY_FEE_MICROLAMPORTS = parseIntegerEnv(
+  process.env.PRIORITY_FEE_MICROLAMPORTS,
+  500_000,
+);
+
+//
+// REDIS
+//
+export const REDIS_URL =
+  process.env.REDIS_URL ?? process.env.REDIS_TLS_URL ?? 'redis://localhost:6379';
+
+//
+// MODE / MISC
+//
+export const MODE = (process.env.MODE ?? 'PAPER').toUpperCase();
+
+export const NODE_ENV = process.env.NODE_ENV ?? 'development';
+
+export const DEBUG_LOGS_ENABLED = parseBooleanEnv(
+  process.env.DEBUG_LOGS_ENABLED,
+  false,
+);
+
+export const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? '';
+
+//
+// DNS tweak (Railway / Node 18+)
+//
+try {
+  dns.setDefaultResultOrder('ipv4first');
+} catch {
+  // ignore
+}
+
+export const ENVIRONMENT_CONFIG = {
+  mode: MODE,
+  nodeEnv: NODE_ENV,
+  dryRun: isDryRunEnabled(),
+  autoTrading: ENABLE_AUTO_TRADING,
+  copyTrading: {
+    minWalletsBuy: COPY_MIN_WALLETS_TO_BUY,
+    minWalletsSell: COPY_MIN_WALLETS_TO_SELL,
+    positionSize: POSITION_SIZE_SOL,
+    profitTargetPercent: COPY_PROFIT_TARGET_PERCENT,
+    stopLossEnabled: COPY_STOP_LOSS_ENABLED,
+    stopLossPercent: COPY_STOP_LOSS_PERCENT,
+    trailingStopEnabled: TRAILING_STOP_ENABLED,
+    trailingStopPercent: TRAILING_STOP_PERCENT,
+    maxHoldEnabled: COPY_MAX_HOLD_ENABLED,
+    maxHoldSeconds: COPY_MAX_HOLD_SECONDS,
+  },
+  volumeExit: {
+    enabled: VOLUME_EXIT_ENABLED,
+    dropPercent: VOLUME_DROP_PERCENT,
+    windowSeconds: VOLUME_WINDOW_SECONDS,
+    minHoldSeconds: VOLUME_MIN_HOLD_SECONDS,
+  },
+  partialTakeProfits: {
+    enabled: PARTIAL_TP_ENABLED,
+    levels: [
+      { tp: PARTIAL_TP1_PCT, sellPct: PARTIAL_TP1_SELL_PCT },
+      { tp: PARTIAL_TP2_PCT, sellPct: PARTIAL_TP2_SELL_PCT },
+      { tp: PARTIAL_TP3_PCT, sellPct: PARTIAL_TP3_SELL_PCT },
+    ],
+  },
+  snipeNewTokens: {
+    enabled: SNIPE_NEW_TOKENS,
+    tokenAgeLimitSeconds: TOKEN_AGE_LIMIT_SECONDS,
+    minBuyVolumeSol: MIN_BUY_VOLUME_SOL,
+    maxTokensPerHour: MAX_TOKENS_PER_HOUR,
+  },
+  rpc: {
+    url: RPC_URL,
+    priorityFeeMicrolamports: PRIORITY_FEE_MICROLAMPORTS,
+  },
+  dex: {
+    pumpFunSlippageBps: PUMP_FUN_SLIPPAGE_BPS,
+    jupiterSlippageBps: JUPITER_SLIPPAGE_BPS,
+  },
+  redis: {
+    url: REDIS_URL,
+  },
+  telegram: {
+    liveUpdates: TELEGRAM_LIVE_UPDATES_ENABLED,
+    ownerChatId: TELEGRAM_OWNER_CHAT_ID,
+    botToken: TELEGRAM_BOT_TOKEN,
+  },
+  debugLogs: DEBUG_LOGS_ENABLED,
+};
