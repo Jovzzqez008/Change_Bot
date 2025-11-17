@@ -444,19 +444,15 @@ export async function startSniperMode(): Promise<void> {
   if (!redis) {
     redis = new RedisClass(process.env.REDIS_URL as string, {
       maxRetriesPerRequest: null,
-      enableOfflineQueue: false,
+      // Para que no truene si el stream aún no está listo
+      enableOfflineQueue: true,
     });
 
-    try {
-      await redis.ping();
-      console.log('✅ SNIPER Redis connected');
-    } catch (error: any) {
-      console.log(
-        '❌ SNIPER: Redis ping failed:',
-        error?.message ?? String(error),
-      );
-      return;
-    }
+    redis.on('error', (err: any) => {
+      console.log('⚠️ SNIPER Redis error:', err?.message ?? String(err));
+    });
+
+    console.log('✅ SNIPER Redis client created');
   }
 
   const cfg: SniperConfig = {
