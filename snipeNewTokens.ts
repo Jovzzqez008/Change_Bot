@@ -274,10 +274,10 @@ async function handleNewToken(evt: NewTokenEvent): Promise<void> {
     const fakeTokensAmount =
       entryPrice > 0 ? positionSizeSol / entryPrice : 0;
 
-    // ✅ Convertir entryPrice a string
+    // ✅ Mantener entryPrice como number
     await positionManager.openPosition(
       mint,
-      entryPrice.toString(),
+      entryPrice,
       positionSizeSol,
       fakeTokensAmount,
       'sniper',
@@ -335,10 +335,10 @@ async function handleNewToken(evt: NewTokenEvent): Promise<void> {
     const entryPrice = buyResult.effectivePrice ?? 0;
     const tokensAmount = buyResult.tokensAmount ?? 0;
 
-    // ✅ Convertir entryPrice a string
+    // ✅ Mantener entryPrice como number
     await positionManager.openPosition(
       mint,
-      entryPrice.toString(),
+      entryPrice,
       positionSizeSol,
       tokensAmount,
       'sniper',
