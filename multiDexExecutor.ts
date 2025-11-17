@@ -51,6 +51,9 @@ export interface BuyResult {
   error?: string;
   simulated?: boolean;
   fallback?: boolean;
+  effectivePrice?: number;
+  tokensAmount?: number;
+  executedDex?: string;
 }
 
 export interface SellResult {
@@ -254,6 +257,13 @@ export class MultiDexExecutor {
       return {
         ...result,
         dex: result.dex ?? 'Pump.fun',
+        executedDex: result.executedDex ?? result.dex ?? 'Pump.fun',
+        tokensAmount: result.tokensAmount ?? result.tokensReceived,
+        effectivePrice:
+          result.effectivePrice ??
+          (result.tokensReceived && result.tokensReceived > 0 && result.solSpent
+            ? result.solSpent / result.tokensReceived
+            : undefined),
       };
     } catch (error: any) {
       console.error(
@@ -309,7 +319,17 @@ export class MultiDexExecutor {
         solAmount,
         slippage,
       );
-      return res;
+      return {
+        ...res,
+        dex: res.dex ?? 'Jupiter',
+        executedDex: res.executedDex ?? res.dex ?? 'Jupiter',
+        tokensAmount: res.tokensAmount ?? res.tokensReceived,
+        effectivePrice:
+          res.effectivePrice ??
+          (res.tokensReceived && res.tokensReceived > 0 && res.solSpent
+            ? res.solSpent / res.tokensReceived
+            : undefined),
+      };
     } catch (error: any) {
       console.error(
         `❌ Jupiter buy error: ${error?.message ?? String(error)}`,
@@ -560,6 +580,10 @@ export class MultiDexExecutor {
         fee: solAmount * FEE_PERCENT,
         dex: dex || 'auto',
         simulated: true,
+        executedDex: dex || 'auto',
+        tokensAmount: tokensOut,
+        effectivePrice:
+          tokensOut > 0 ? solAmount / tokensOut : undefined,
       };
     } catch {
       return this.fallbackSimulateBuy(mint, solAmount, dex);
@@ -650,6 +674,10 @@ export class MultiDexExecutor {
       dex: dex || 'auto',
       simulated: true,
       fallback: true,
+      executedDex: dex || 'auto',
+      tokensAmount: estimatedTokens,
+      effectivePrice:
+        estimatedTokens > 0 ? solAmount / estimatedTokens : undefined,
     };
   }
 

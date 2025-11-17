@@ -89,6 +89,26 @@ export const COPY_SIGNAL_TTL_SECONDS = parseIntegerEnv(
   600,
 );
 
+export const COPY_COOLDOWN_SECONDS = parseIntegerEnv(
+  process.env.COPY_COOLDOWN_SECONDS,
+  0,
+);
+
+export const COPY_PROFIT_TARGET_ENABLED = parseBooleanEnv(
+  process.env.COPY_PROFIT_TARGET_ENABLED,
+  true,
+);
+
+export const BLOCK_REBUYS_ENABLED =
+  process.env.BLOCK_REBUYS_ENABLED !== undefined
+    ? parseBooleanEnv(process.env.BLOCK_REBUYS_ENABLED, true)
+    : COPY_BLOCK_REBUY_ENABLED;
+
+export const REBUY_WINDOW_SECONDS = parseIntegerEnv(
+  process.env.REBUY_WINDOW_SECONDS,
+  300,
+);
+
 //
 // POSITION SIZE / RISK
 //
@@ -233,6 +253,7 @@ export const MAX_TOKENS_PER_HOUR = parseIntegerEnv(
 // PUMP.FUN / JUPITER / RPC
 //
 export const RPC_URL = process.env.RPC_URL ?? '';
+export const RPC_WEBSOCKET_URL = process.env.RPC_WEBSOCKET_URL ?? RPC_URL;
 
 export const PRIVATE_KEY = process.env.PRIVATE_KEY ?? '';
 
@@ -241,10 +262,33 @@ export const PUMP_FUN_SLIPPAGE_BPS = parseIntegerEnv(
   500,
 );
 
+const pumpBuySlippageBps = parseIntegerEnv(
+  process.env.PUMP_BUY_SLIPPAGE_BPS,
+  PUMP_FUN_SLIPPAGE_BPS,
+);
+
+const pumpSellSlippageBps = parseIntegerEnv(
+  process.env.PUMP_SELL_SLIPPAGE_BPS,
+  pumpBuySlippageBps,
+);
+
+export const PUMP_BUY_SLIPPAGE_BPS = pumpBuySlippageBps;
+export const PUMP_SELL_SLIPPAGE_BPS = pumpSellSlippageBps;
+
 export const JUPITER_SLIPPAGE_BPS = parseIntegerEnv(
   process.env.JUPITER_SLIPPAGE_BPS,
   1000,
 );
+
+const jupiterSlippagePctEnv = process.env.JUPITER_SLIPPAGE_PCT;
+
+export const JUPITER_SLIPPAGE_PCT =
+  jupiterSlippagePctEnv !== undefined && jupiterSlippagePctEnv !== ''
+    ? parseNumberEnv(jupiterSlippagePctEnv, JUPITER_SLIPPAGE_BPS / 10_000)
+    : JUPITER_SLIPPAGE_BPS / 10_000;
+
+export const PUMP_BUY_SLIPPAGE_PCT = pumpBuySlippageBps / 10_000;
+export const PUMP_SELL_SLIPPAGE_PCT = pumpSellSlippageBps / 10_000;
 
 export const PRIORITY_FEE_MICROLAMPORTS = parseIntegerEnv(
   process.env.PRIORITY_FEE_MICROLAMPORTS,
@@ -270,6 +314,11 @@ export const DEBUG_LOGS_ENABLED = parseBooleanEnv(
 );
 
 export const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? '';
+
+export const GRADUATION_MIN_PROFIT_PERCENT = parseNumberEnv(
+  process.env.GRADUATION_MIN_PROFIT_PERCENT,
+  50,
+);
 
 //
 // DNS tweak (Railway / Node 18+)

@@ -52,6 +52,8 @@ let positionManager: PositionManager | null = null;
 let tradeExecutor: MultiDexExecutor | null = null;
 let ws: WebSocket | null = null;
 
+type WebSocketRawData = string | Buffer | ArrayBuffer | Buffer[];
+
 // Control simple para no entrar a demasiados tokens por hora
 let hourlySnipes = 0;
 
@@ -415,7 +417,7 @@ export async function startSniperMode(): Promise<void> {
     }
   });
 
-  ws.on('message', async (data: WebSocket.RawData) => {
+  ws.on('message', async (data: WebSocketRawData) => {
     try {
       const text =
         typeof data === 'string' ? data : data.toString('utf8');

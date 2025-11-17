@@ -55,6 +55,9 @@ export interface BuyResult {
   dex?: string;
   error?: string;
   simulated?: boolean;
+  executedDex?: string;
+  tokensAmount?: number;
+  effectivePrice?: number;
 }
 
 export interface SellResult {
@@ -416,6 +419,10 @@ export class PumpFunExecutor {
         tokensReceived: tokensOut,
         solSpent: solAmount,
         dex: 'Pump.fun',
+        executedDex: 'Pump.fun',
+        tokensAmount: tokensOut,
+        effectivePrice:
+          tokensOut > 0 ? solAmount / tokensOut : undefined,
       };
     } catch (error: any) {
       console.error(`❌ Buy error: ${error?.message ?? String(error)}`);
@@ -699,6 +706,10 @@ export class PumpFunExecutor {
       solSpent: solAmount,
       dex: 'Pump.fun',
       simulated: true,
+      executedDex: 'Pump.fun',
+      tokensAmount: estimatedTokens,
+      effectivePrice:
+        estimatedTokens > 0 ? solAmount / estimatedTokens : undefined,
     };
   }
 

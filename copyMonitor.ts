@@ -46,6 +46,26 @@ import {
 import { PositionManager, type Position } from './riskManager.js';
 import { createRedisClient, type RedisClient as RedisWrapper } from './redisClient.js';
 
+type DexPreference = 'auto' | 'Pump.fun' | 'Jupiter' | 'Raydium' | 'Orca';
+
+function normalizeDexPreference(value?: string | null): DexPreference {
+  const normalized = (value ?? '').trim().toLowerCase();
+  switch (normalized) {
+    case 'pump.fun':
+    case 'pumpfun':
+    case 'pump':
+      return 'Pump.fun';
+    case 'jupiter':
+      return 'Jupiter';
+    case 'raydium':
+      return 'Raydium';
+    case 'orca':
+      return 'Orca';
+    default:
+      return 'auto';
+  }
+}
+
 // --- Tipos auxiliares internos ---
 
 interface CopySignal {
@@ -386,7 +406,7 @@ async function processCopySignal(signal: CopySignal): Promise<void> {
   const buyResult: BuyResult = await tradeExecutor.buyToken(
     signal.mint,
     solAmount,
-    'pumpfun',
+    'Pump.fun',
   );
 
   if (!buyResult.success) {
@@ -401,9 +421,10 @@ async function processCopySignal(signal: CopySignal): Promise<void> {
     solAmount,
     tokensAmount: buyResult.tokensAmount ?? 0,
     walletName: signal.walletName ?? 'Copy wallet',
+    walletSource: signal.wallet,
     strategy: 'copy',
     originalSignature: signal.signature,
-    executedDex: buyResult.executedDex ?? 'pumpfun',
+    executedDex: buyResult.executedDex ?? 'Pump.fun',
     entryTime: Date.now(),
     upvotes: signal.upvotes ?? 1,
   });
@@ -500,7 +521,7 @@ async function monitorOpenPositions() {
         const holdTime = Date.now() - Number(position.entryTime ?? 0);
 
         // HYBRID exit
-        const hybridExit =
+        const hybridExit: HybridExitDecision =
           position.strategy === 'copy'
             ? await evaluateHybridExit(
                 position,
@@ -677,15 +698,12 @@ async function handlePartialTakeProfits(
       )}%`,
     );
 
-    const dexHint =
-      position.executedDex && position.executedDex.length > 0
-        ? position.executedDex
-        : 'auto';
+    const dexHint = normalizeDexPreference(position.executedDex);
 
     const sellResult = await tradeExecutor.sellToken(
       position.mint,
       tokensToSell,
-      dexHint as any,
+      dexHint,
     );
 
     if (!sellResult.success) {
@@ -790,15 +808,12 @@ async function executeSell(
     return;
   }
 
-  const dexHint =
-    position.executedDex && position.executedDex.length > 0
-      ? position.executedDex
-      : 'auto';
+  const dexHint = normalizeDexPreference(position.executedDex);
 
   const sellResult: SellResult = await tradeExecutor.sellToken(
     mint,
     tokensAmount,
-    dexHint as any,
+    dexHint,
   );
 
   if (!sellResult.success) {
