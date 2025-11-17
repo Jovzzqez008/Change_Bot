@@ -1,435 +1,412 @@
-// snipeNewTokens.ts - Modo SNIPER ALL NEW TOKENS (Pump.fun) con DRY_RUN friendly
+// snipeNewTokens.ts - SNIPER ALL NEW TOKENS (Pump.fun / PumpPortal)
+
 import 'dotenv/config';
-import WebSocket from 'ws';
+import WebSocket, { type RawData as WebSocketRawData } from 'ws';
 import { Redis as RedisClass } from 'ioredis';
 import type { Redis as RedisClient } from 'ioredis';
+import { PublicKey } from '@solana/web3.js';
 
 import {
+  isDryRunEnabled,
+  POSITION_SIZE_SOL,
   SNIPE_NEW_TOKENS,
   TOKEN_AGE_LIMIT_SECONDS,
   MIN_BUY_VOLUME_SOL,
   MAX_TOKENS_PER_HOUR,
-  POSITION_SIZE_SOL,
-  RPC_URL,
-  ENABLE_AUTO_TRADING,
-  TELEGRAM_OWNER_CHAT_ID,
-  isDryRunEnabled,
 } from './environment.js';
 
+import { getPriceService } from './priceService.js';
+import type { PriceData } from './priceService.js';
 import { MultiDexExecutor } from './multiDexExecutor.js';
 import { PositionManager } from './riskManager.js';
 import { sendTelegramAlert } from './telegram.js';
 
-// --- Tipos aproximados para eventos de nuevos tokens ---
-// (La estructura real puede variar, estos campos son los más comunes)
+// --- Tipos básicos ---
+
 interface NewTokenEvent {
   mint: string;
-  symbol?: string;
-  name?: string;
-  creator: string;
-  // timestamps en ms o segundos, lo normal es ms
-  createdAt?: number; // ms
-  launchTimestamp?: number; // ms o s
-  // volumen / liquidez en SOL
-  initialLiquiditySol?: number;
-  volume1mSol?: number;
+  signature?: string;
+  traderPublicKey?: string;
+  txType?: string;
+  initialBuy?: number;
+  solAmount?: number;
+  vTokensInBondingCurve?: number;
+  vSolInBondingCurve?: number;
   marketCapSol?: number;
-  priceSol?: number; // precio estimado en SOL por token
-  [key: string]: any;
+  name?: string;
+  symbol?: string;
+  uri?: string;
+  pool?: string;
+  createdAt?: number | string | null;
 }
 
-const DRY_RUN = isDryRunEnabled();
-
-// WebSocket de Pump.fun / PumpPortal (puedes ajustar con ENV si quieres)
-const PUMP_WS_URL =
-  process.env.PUMP_WS_URL ||
-  'wss://pumpportal.fun/api/data'; // valor por defecto, ajustable
-
-// --- Instancias base ---
+interface SniperConfig {
+  dryRun: boolean;
+  positionSizeSol: number;
+  tokenAgeLimitSeconds: number;
+  minBuyVolumeSol: number;
+  maxTokensPerHour: number;
+}
 
 let redis: RedisClient | null = null;
-let positionManager: PositionManager | null = null;
-let tradeExecutor: MultiDexExecutor | null = null;
 let ws: WebSocket | null = null;
+let lastHourTimestamp = 0;
+let tokensThisHour = 0;
 
-type WebSocketRawData = string | Buffer | ArrayBuffer | Buffer[];
+const priceService = getPriceService();
 
-// Control simple para no entrar a demasiados tokens por hora
-let hourlySnipes = 0;
+// --- Normalizador de eventos (PumpPortal → NewTokenEvent interno) ---
 
-// --- Helpers numéricos / utilidades ---
+function normalizeNewTokenEvent(raw: any): NewTokenEvent {
+  const createdAt =
+    raw.createdAt ??
+    raw.CreatedAt ??
+    raw.blockTime ??
+    raw.BlockTime ??
+    null;
 
-function nowMs(): number {
-  return Date.now();
+  return {
+    mint: raw.mint ?? raw.Mint ?? raw.tokenMint ?? raw.TokenMint ?? '',
+    signature: raw.signature ?? raw.Signature ?? raw.sig ?? '',
+    traderPublicKey:
+      raw.traderPublicKey ?? raw.TraderPublicKey ?? raw.owner ?? raw.Owner ?? '',
+    txType: raw.txType ?? raw.TxType ?? raw.type ?? '',
+    initialBuy: raw.initialBuy ?? raw.InitialBuy ?? 0,
+    solAmount: raw.solAmount ?? raw.SolAmount ?? 0,
+    vTokensInBondingCurve:
+      raw.vTokensInBondingCurve ?? raw.VTokensInBondingCurve ?? 0,
+    vSolInBondingCurve:
+      raw.vSolInBondingCurve ?? raw.VSolInBondingCurve ?? 0,
+    marketCapSol: raw.marketCapSol ?? raw.MarketCapSol ?? 0,
+    name: raw.name ?? raw.Name ?? '',
+    symbol: raw.symbol ?? raw.Symbol ?? '',
+    uri: raw.uri ?? raw.Uri ?? '',
+    pool:
+      raw.pool ??
+      raw.Pool ??
+      raw.bondingCurveKey ??
+      raw.BondingCurveKey ??
+      '',
+    createdAt,
+  };
 }
 
+// --- Helpers numéricos / validaciones ---
+
 function getTokenAgeSeconds(evt: NewTokenEvent): number {
-  const now = nowMs();
+  const createdAt =
+    evt.createdAt ??
+    (typeof evt as any).launchTimestamp ??
+    (typeof evt as any).firstSeen ??
+    (typeof evt as any).created_at ??
+    (typeof evt as any).launchTime ??
+    null;
 
-  let createdMs: number | undefined;
+  // Si no tenemos timestamp, asumimos que es "recién creado"
+  if (!createdAt) return 0;
 
-  if (typeof evt.createdAt === 'number') {
-    createdMs =
-      evt.createdAt > 10_000_000_000 ? evt.createdAt : evt.createdAt * 1000;
-  } else if (typeof evt.launchTimestamp === 'number') {
-    createdMs =
-      evt.launchTimestamp > 10_000_000_000
-        ? evt.launchTimestamp
-        : evt.launchTimestamp * 1000;
-  }
+  const ms =
+    typeof createdAt === 'number'
+      ? createdAt * (createdAt > 10_000_000_000 ? 1 : 1000)
+      : Date.parse(String(createdAt));
 
-  if (!createdMs) {
-    // Si no viene timestamp, asumimos "recién creado"
-    return 0;
-  }
+  if (!Number.isFinite(ms)) return 0;
 
-  return (now - createdMs) / 1000;
+  return (Date.now() - ms) / 1000;
 }
 
 function getInitialVolumeSol(evt: NewTokenEvent): number {
-  // Tomamos el volumen más informativo disponible
-  return (
-    evt.volume1mSol ??
-    evt.initialLiquiditySol ??
+  const mcap =
     evt.marketCapSol ??
-    0
-  );
+    (evt as any).marketCap ??
+    (evt as any).market_cap ??
+    0;
+  const solAmount =
+    evt.solAmount ??
+    (evt as any).SolAmount ??
+    (evt as any).sol_in ??
+    0;
+
+  if (mcap && Number.isFinite(mcap)) return mcap;
+  if (solAmount && Number.isFinite(solAmount)) return solAmount;
+  return 0;
 }
 
-function getApproxPriceSol(evt: NewTokenEvent): number {
-  // Si el evento trae un precio aproximado en SOL por token, lo usamos
-  if (typeof evt.priceSol === 'number' && evt.priceSol > 0) {
-    return evt.priceSol;
-  }
-  // Fallback ultra conservador para DRY_RUN
-  return 0.00000001;
-}
-
-// --- Inicialización base (Redis + PositionManager + MultiDexExecutor) ---
-
-async function ensureInitialized(): Promise<void> {
-  if (!redis) {
-    if (!process.env.REDIS_URL) {
-      throw new Error('REDIS_URL is required for SNIPER mode');
-    }
-    redis = new RedisClass(process.env.REDIS_URL as string, {
-      maxRetriesPerRequest: null,
-    });
-  }
-
-  if (!positionManager) {
-    positionManager = new PositionManager(redis as RedisClient);
-  }
-
-  // Para DRY_RUN no creamos MultiDexExecutor para NO tocar el RPC
-  if (!DRY_RUN && !tradeExecutor) {
-    if (!process.env.PRIVATE_KEY) {
-      throw new Error('PRIVATE_KEY is required for LIVE SNIPER mode');
-    }
-    tradeExecutor = new MultiDexExecutor(
-      process.env.PRIVATE_KEY as string,
-      RPC_URL,
-      DRY_RUN,
-    );
+function isLikelyPumpFunPool(evt: NewTokenEvent): boolean {
+  const pool = evt.pool ?? (evt as any).bondingCurveKey ?? '';
+  if (!pool) return false;
+  try {
+    // Solo validamos que tenga pinta de PublicKey
+    void new PublicKey(pool);
+    return true;
+  } catch {
+    return false;
   }
 }
 
-// --- Lógica principal de SNIPER ---
+function isPossibleHoneyPot(evt: NewTokenEvent): boolean {
+  const name = (evt.name ?? '').toLowerCase();
+  const symbol = (evt.symbol ?? '').toLowerCase();
+  const uri = (evt.uri ?? '').toLowerCase();
+
+  const blacklistWords = [
+    'scam',
+    'rug',
+    'honeypot',
+    'phish',
+    'fraud',
+    'hack',
+    'exploit',
+  ];
+
+  const text = `${name} ${symbol} ${uri}`;
+  return blacklistWords.some((w) => text.includes(w));
+}
+
+function canSnipeMoreTokens(): boolean {
+  if (!MAX_TOKENS_PER_HOUR || MAX_TOKENS_PER_HOUR <= 0) return true;
+
+  const now = Date.now();
+  if (lastHourTimestamp === 0) {
+    lastHourTimestamp = now;
+    tokensThisHour = 0;
+    return true;
+  }
+
+  const diffMs = now - lastHourTimestamp;
+  if (diffMs > 60 * 60 * 1000) {
+    lastHourTimestamp = now;
+    tokensThisHour = 0;
+    return true;
+  }
+
+  return tokensThisHour < MAX_TOKENS_PER_HOUR;
+}
+
+function registerSnipedToken(): void {
+  const now = Date.now();
+  if (lastHourTimestamp === 0) {
+    lastHourTimestamp = now;
+    tokensThisHour = 0;
+  }
+
+  const diffMs = now - lastHourTimestamp;
+  if (diffMs > 60 * 60 * 1000) {
+    lastHourTimestamp = now;
+    tokensThisHour = 0;
+  }
+
+  tokensThisHour++;
+}
+
+// --- Core: manejar un nuevo token ---
 
 async function handleNewToken(evt: NewTokenEvent): Promise<void> {
-  await ensureInitialized();
+  if (!SNIPE_NEW_TOKENS) return;
 
   const mint = evt.mint;
   if (!mint) return;
 
-  const ageSec = getTokenAgeSeconds(evt);
+  if (!isLikelyPumpFunPool(evt)) {
+    return;
+  }
+
+  if (isPossibleHoneyPot(evt)) {
+    console.log(
+      `⚠️ SNIPER IGNORE (honeypot heuristics): ${evt.name ?? ''} | ${mint}`,
+    );
+    return;
+  }
+
+  const ageSeconds = getTokenAgeSeconds(evt);
+  if (ageSeconds > TOKEN_AGE_LIMIT_SECONDS) {
+    console.log(
+      `⏱️ SNIPER IGNORE (age ${ageSeconds.toFixed(
+        1,
+      )}s > ${TOKEN_AGE_LIMIT_SECONDS}s): ${mint}`,
+    );
+    return;
+  }
+
   const volumeSol = getInitialVolumeSol(evt);
-
-  // 1) Filtro por edad
-  if (ageSec > TOKEN_AGE_LIMIT_SECONDS) {
-    // Muy viejo para sniper
-    return;
-  }
-
-  // 2) Filtro de volumen mínimo
   if (volumeSol < MIN_BUY_VOLUME_SOL) {
+    console.log(
+      `💧 SNIPER IGNORE (vol ${volumeSol.toFixed(
+        4,
+      )} SOL < ${MIN_BUY_VOLUME_SOL}): ${mint}`,
+    );
     return;
   }
 
-  // 3) Límite por hora
-  if (MAX_TOKENS_PER_HOUR > 0 && hourlySnipes >= MAX_TOKENS_PER_HOUR) {
+  if (!canSnipeMoreTokens()) {
+    console.log(
+      `🚦 SNIPER LIMIT REACHED (${MAX_TOKENS_PER_HOUR}/h), skipping: ${mint}`,
+    );
     return;
   }
 
-  // 4) ¿Ya tenemos posición abierta en este mint?
-  if (redis) {
-    const alreadyOpen = await redis.sismember('open_positions', mint);
-    if (alreadyOpen) {
-      return;
-    }
+  console.log(
+    `🔥 NEW TOKEN DETECTED: ${evt.name ?? ''} (${evt.symbol ?? ''}) | ${mint}`,
+  );
+  console.log(
+    `   Age: ${ageSeconds.toFixed(1)}s, InitVol: ${volumeSol.toFixed(
+      4,
+    )} SOL, Pool: ${evt.pool ?? (evt as any).bondingCurveKey ?? 'N/A'}`,
+  );
 
-    const cooldown = await redis.get(`sniper_cooldown:${mint}`);
-    if (cooldown) {
-      // Ya se intentó hace poco
-      return;
-    }
+  const DRY_RUN = isDryRunEnabled();
+  const positionSizeSol = POSITION_SIZE_SOL;
+
+  if (!redis) {
+    console.log('⚠️ SNIPER: Redis not initialized, cannot proceed');
+    return;
   }
 
-  console.log('\n🎯 SNIPER SIGNAL - NEW TOKEN');
-  console.log(`   Mint: ${mint}`);
-  console.log(`   Age: ${ageSec.toFixed(1)}s`);
-  console.log(`   Volume (approx): ${volumeSol.toFixed(4)} SOL`);
+  registerSnipedToken();
 
-  await executeSniperBuy(evt);
-}
-
-async function executeSniperBuy(evt: NewTokenEvent): Promise<void> {
-  if (!positionManager || !redis) return;
-
-  const mint = evt.mint;
-  const solAmount = POSITION_SIZE_SOL;
-
-  // Marcador simple para no intentar de nuevo en unos segundos
-  await redis.setex(`sniper_cooldown:${mint}`, 60, '1');
-
-  const creator = evt.creator || 'unknown_creator';
-  const tokenName =
-    evt.name || evt.symbol || mint.slice(0, 8);
-
-  if (DRY_RUN || !tradeExecutor || !ENABLE_AUTO_TRADING) {
-    // ─────────────────────────────────────────
-    // 📄 DRY_RUN: NO USAMOS RPC NI MultiDexExecutor
-    // Simulamos la compra usando un precio aproximado
-    // ─────────────────────────────────────────
-    const approxPriceSol = getApproxPriceSol(evt);
-    const tokensSimulated =
-      approxPriceSol > 0
-        ? solAmount / approxPriceSol
-        : solAmount / 0.00000001;
-
-    const entryPrice = approxPriceSol || 0.00000001;
-
-    await positionManager.openPosition(
+  if (DRY_RUN) {
+    // Solo simulación: registrar una posición "fantasma" en Redis
+    const positionManager = new PositionManager(redis);
+    const entryPriceData: PriceData = await priceService.getPrice(
       mint,
-      'SNIPER',
-      entryPrice,
-      solAmount,
-      tokensSimulated,
-      'SNIPER_DRY_RUN_BUY',
+      true,
     );
 
-    await redis.hset(`position:${mint}`, {
+    const entryPrice = entryPriceData.price ?? 0;
+    const fakeTokensAmount =
+      entryPrice > 0 ? positionSizeSol / entryPrice : 0;
+
+    await positionManager.openPosition({
+      mint,
+      symbol: evt.symbol ?? '',
       strategy: 'sniper',
-      walletSource: creator,
-      walletName: 'SNIPER_DEV',
-      originalSignature: 'SNIPER_NEW_TOKEN',
-      originalDex: 'Pump.fun',
-      executedDex: 'PAPER',
-      exitStrategy: 'sniper_trailing',
-      mode: 'DRY',
-      entrySource: 'SNIPER',
-      dex: 'Pump.fun',
-      strategyTag: 'SNIPER',
+      entryPrice,
+      solAmount: positionSizeSol,
+      tokensAmount: fakeTokensAmount,
+      entryTime: Date.now(),
+      executedDex: 'Pump.fun',
+      originalSignature: evt.signature ?? '',
+      walletName: 'SNIPER',
     });
 
-    hourlySnipes++;
-
-    if (TELEGRAM_OWNER_CHAT_ID) {
-      try {
-        await sendTelegramAlert(
-          TELEGRAM_OWNER_CHAT_ID,
-          `🎯 SNIPER (DRY-RUN)\n\n` +
-            `Token: ${tokenName}\n` +
-            `Mint: ${mint.slice(0, 16)}...\n` +
-            `Creator: ${creator.slice(0, 12)}...\n` +
-            `Age: ${getTokenAgeSeconds(evt).toFixed(1)}s\n` +
-            `Volume: ${getInitialVolumeSol(evt).toFixed(4)} SOL\n` +
-            `\n` +
-            `Simulated Buy: ${solAmount.toFixed(4)} SOL\n` +
-            `Est. Price: ${entryPrice.toFixed(10)} SOL\n` +
-            `Tokens (sim): ${tokensSimulated.toFixed(2)}\n` +
-            `\n` +
-            `Strategy: SNIPER_ALL_NEW_TOKENS\n` +
-            `• DRY_RUN (no RPC used)\n` +
-            `• TOKEN_AGE_LIMIT_SECONDS=${TOKEN_AGE_LIMIT_SECONDS}\n` +
-            `• MIN_BUY_VOLUME_SOL=${MIN_BUY_VOLUME_SOL}\n` +
-            `• MAX_TOKENS_PER_HOUR=${MAX_TOKENS_PER_HOUR}`,
-          false,
-        );
-      } catch {
-        /* ignore */
-      }
-    }
-
     console.log(
-      `   ✅ DRY-RUN SNIPER POSITION OPENED for ${mint.slice(
-        0,
-        8,
-      )}...`,
+      `🧪 SNIPER DRY-RUN BUY: ${positionSizeSol} SOL on ${mint} @ ${entryPrice.toFixed(
+        9,
+      )}`,
     );
+
+    await sendTelegramAlert(
+      process.env.TELEGRAM_OWNER_CHAT_ID,
+      `🧪 SNIPER DRY-RUN BUY\n\n` +
+        `Token: ${evt.name ?? ''} (${evt.symbol ?? ''})\n` +
+        `Mint: ${mint}\n` +
+        `Age: ${ageSeconds.toFixed(1)}s\n` +
+        `InitVol: ${volumeSol.toFixed(4)} SOL\n` +
+        `Amount: ${positionSizeSol} SOL\n` +
+        `Mode: DRY-RUN (NO TX SENT)`,
+      false,
+    );
+
     return;
   }
 
-  // ─────────────────────────────────────────
-  // 💰 LIVE MODE: usar MultiDexExecutor (Pump.fun + Jupiter)
-  // ─────────────────────────────────────────
   try {
-    console.log('   💰 Executing LIVE SNIPER BUY via MultiDexExecutor...');
-
-    const buyResult = await tradeExecutor.buyToken(
-      mint,
-      solAmount,
-      'auto',
+    const executor = new MultiDexExecutor(
+      process.env.PRIVATE_KEY as string,
+      process.env.RPC_URL as string,
+      false,
     );
 
-    if (!buyResult.success || !buyResult.tokensReceived) {
+    const buyResult = await executor.buyToken(
+      mint,
+      positionSizeSol,
+      'Pump.fun',
+    );
+
+    if (!buyResult.success) {
       console.log(
-        `   ❌ SNIPER BUY FAILED: ${buyResult.error ?? 'Unknown error'}`,
+        `❌ SNIPER BUY FAILED for ${mint}: ${buyResult.error ?? 'unknown'}`,
       );
       return;
     }
 
-    const entryPrice = getApproxPriceSol(evt);
-    const tokensReceived = buyResult.tokensReceived;
+    const positionManager = new PositionManager(redis);
+    const entryPrice =
+      buyResult.effectivePrice ?? buyResult.price ?? 0;
+    const tokensAmount =
+      buyResult.tokensAmount ?? buyResult.tokensOut ?? 0;
 
-    await positionManager.openPosition(
+    await positionManager.openPosition({
       mint,
-      'SNIPER',
-      entryPrice,
-      solAmount,
-      tokensReceived,
-      buyResult.signature ?? 'SNIPER_BUY',
-    );
-
-    await redis.hset(`position:${mint}`, {
+      symbol: evt.symbol ?? '',
       strategy: 'sniper',
-      walletSource: creator,
-      walletName: 'SNIPER_DEV',
-      originalSignature: 'SNIPER_NEW_TOKEN',
-      originalDex: 'Pump.fun',
-      executedDex: buyResult.dex ?? 'Unknown',
-      exitStrategy: 'sniper_trailing',
-      mode: 'LIVE',
-      entrySource: 'SNIPER',
-      dex: buyResult.dex ?? 'Pump.fun',
-      strategyTag: 'SNIPER',
+      entryPrice,
+      solAmount: positionSizeSol,
+      tokensAmount,
+      entryTime: Date.now(),
+      executedDex: buyResult.executedDex ?? 'Pump.fun',
+      originalSignature: buyResult.signature ?? evt.signature ?? '',
+      walletName: 'SNIPER',
     });
 
-    hourlySnipes++;
-
-    if (TELEGRAM_OWNER_CHAT_ID) {
-      try {
-        const dexEmoji =
-          buyResult.dex === 'Pump.fun'
-            ? '🚀'
-            : buyResult.dex === 'Jupiter'
-            ? '🪐'
-            : buyResult.dex === 'Raydium'
-            ? '⚡'
-            : buyResult.dex === 'Orca'
-            ? '🐋'
-            : '💱';
-
-        await sendTelegramAlert(
-          TELEGRAM_OWNER_CHAT_ID,
-          `🎯 SNIPER BUY (LIVE)\n\n` +
-            `Token: ${tokenName}\n` +
-            `Mint: ${mint.slice(0, 16)}...\n` +
-            `Creator: ${creator.slice(0, 12)}...\n` +
-            `Age: ${getTokenAgeSeconds(evt).toFixed(1)}s\n` +
-            `Volume: ${getInitialVolumeSol(evt).toFixed(4)} SOL\n` +
-            `\n` +
-            `${dexEmoji} DEX: ${buyResult.dex ?? 'Unknown'}\n` +
-            `Amount: ${solAmount.toFixed(4)} SOL\n` +
-            `Tokens: ${tokensReceived.toFixed(2)}\n` +
-            `Signature: ${buyResult.signature?.slice(0, 16)}...\n` +
-            `\n` +
-            `Strategy: SNIPER_ALL_NEW_TOKENS\n` +
-            `• TOKEN_AGE_LIMIT_SECONDS=${TOKEN_AGE_LIMIT_SECONDS}\n` +
-            `• MIN_BUY_VOLUME_SOL=${MIN_BUY_VOLUME_SOL}\n` +
-            `• MAX_TOKENS_PER_HOUR=${MAX_TOKENS_PER_HOUR}`,
-          false,
-        );
-      } catch {
-        /* ignore */
-      }
-    }
-
     console.log(
-      `   ✅ LIVE SNIPER BUY EXECUTED on ${
-        buyResult.dex ?? 'Unknown'
-      }`,
+      `💸 SNIPER BUY EXECUTED: ${positionSizeSol} SOL on ${mint} @ ${entryPrice.toFixed(
+        9,
+      )}`,
+    );
+
+    await sendTelegramAlert(
+      process.env.TELEGRAM_OWNER_CHAT_ID,
+      `💸 SNIPER LIVE BUY\n\n` +
+        `Token: ${evt.name ?? ''} (${evt.symbol ?? ''})\n` +
+        `Mint: ${mint}\n` +
+        `Age: ${ageSeconds.toFixed(1)}s\n` +
+        `InitVol: ${volumeSol.toFixed(4)} SOL\n` +
+        `Amount: ${positionSizeSol} SOL\n` +
+        `Mode: LIVE`,
+      false,
     );
   } catch (error: any) {
-    console.error(
-      '   ❌ Error executing LIVE SNIPER BUY:',
+    console.log(
+      `❌ SNIPER ERROR while buying ${mint}:`,
       error?.message ?? String(error),
     );
   }
 }
 
-// --- WebSocket SNIPER LOOP ---
+// --- WebSocket PumpPortal ---
 
-export async function startSniperMode(): Promise<void> {
-  if (!SNIPE_NEW_TOKENS) {
-    console.log('🔕 SNIPER mode disabled (SNIPE_NEW_TOKENS=false)');
-    return;
-  }
+const PUMPPORTAL_WS_URL =
+  process.env.PUMPPORTAL_WS_URL ??
+  'wss://pumpportal.fun/api/data';
 
-  if (!ENABLE_AUTO_TRADING) {
-    console.log(
-      '🔕 SNIPER mode disabled because ENABLE_AUTO_TRADING=false',
-    );
-    return;
-  }
+function createSniperWebSocket(): WebSocket {
+  const socket = new WebSocket(PUMPPORTAL_WS_URL);
 
-  await ensureInitialized();
-
-  // Reset contador cada hora
-  setInterval(() => {
-    hourlySnipes = 0;
-  }, 60 * 60 * 1000);
-
-  console.log('🚀 SNIPER MODE (ALL NEW TOKENS) INITIALIZED');
-  console.log(
-    `   Mode: ${DRY_RUN ? '📄 DRY_RUN (NO RPC)' : '💰 LIVE (RPC + MultiDex)'}`,
-  );
-  console.log(`   TOKEN_AGE_LIMIT_SECONDS = ${TOKEN_AGE_LIMIT_SECONDS}`);
-  console.log(`   MIN_BUY_VOLUME_SOL      = ${MIN_BUY_VOLUME_SOL}`);
-  console.log(`   MAX_TOKENS_PER_HOUR     = ${MAX_TOKENS_PER_HOUR}`);
-  console.log(`   POSITION_SIZE_SOL       = ${POSITION_SIZE_SOL}\n`);
-
-  ws = new WebSocket(PUMP_WS_URL);
-
-  ws.on('open', () => {
+  socket.on('open', () => {
     console.log('✅ SNIPER WS connected to Pump.fun / PumpPortal');
 
-    // NOTA: Este mensaje depende del protocolo real del WS.
-    // Ajusta según la documentación real del endpoint que uses.
-    const subMsg = {
-      method: 'subscribeNewTokens',
+    const msg = {
+      method: 'subscribeNewToken',
       params: {},
     };
-    try {
-      ws?.send(JSON.stringify(subMsg));
-    } catch {
-      /* ignore */
-    }
+
+    socket.send(JSON.stringify(msg));
   });
 
-  ws.on('message', async (data: WebSocketRawData) => {
+  socket.on('message', async (data: WebSocketRawData) => {
     try {
       const text =
         typeof data === 'string' ? data : data.toString('utf8');
       const parsed = JSON.parse(text);
 
-      // Ajusta esta lógica según el formato real del WS
-      const evt: NewTokenEvent =
-        parsed.token ??
-        parsed.data ??
-        parsed as NewTokenEvent;
+      // Normalizar el mensaje del WS (PumpPortal usa campos en PascalCase)
+      const raw = parsed.token ?? parsed.data ?? parsed;
+      const evt = normalizeNewTokenEvent(raw);
 
-      if (!evt || !evt.mint) return;
+      if (!evt.mint) {
+        return;
+      }
 
       await handleNewToken(evt);
     } catch (error: any) {
@@ -440,16 +417,73 @@ export async function startSniperMode(): Promise<void> {
     }
   });
 
-  ws.on('close', () => {
-    console.log('⚠️ SNIPER WS connection closed');
+  socket.on('error', (err) => {
+    console.error('⚠️ SNIPER WS error:', err);
   });
 
-  ws.on('error', (error: any) => {
-    console.error(
-      '❌ SNIPER WS error:',
-      error?.message ?? String(error),
-    );
+  socket.on('close', () => {
+    console.log('⚠️ SNIPER WS closed, will attempt reconnect in 5s...');
+    setTimeout(() => {
+      ws = createSniperWebSocket();
+    }, 5000);
   });
+
+  return socket;
 }
 
+// --- Inicialización pública ---
+
+export async function startSniperMode(): Promise<void> {
+  if (!SNIPE_NEW_TOKENS) {
+    console.log('📡 SNIPER MODE disabled via env (SNIPE_NEW_TOKENS=false)');
+    return;
+  }
+
+  if (!process.env.REDIS_URL) {
+    console.log('❌ SNIPER: REDIS_URL not set');
+    return;
+  }
+
+  if (!redis) {
+    redis = new RedisClass(process.env.REDIS_URL as string, {
+      maxRetriesPerRequest: null,
+      enableOfflineQueue: false,
+    });
+
+    try {
+      await redis.ping();
+      console.log('✅ SNIPER Redis connected');
+    } catch (error: any) {
+      console.log(
+        '❌ SNIPER: Redis ping failed:',
+        error?.message ?? String(error),
+      );
+      return;
+    }
+  }
+
+  const cfg: SniperConfig = {
+    dryRun: isDryRunEnabled(),
+    positionSizeSol: POSITION_SIZE_SOL,
+    tokenAgeLimitSeconds: TOKEN_AGE_LIMIT_SECONDS,
+    minBuyVolumeSol: MIN_BUY_VOLUME_SOL,
+    maxTokensPerHour: MAX_TOKENS_PER_HOUR,
+  };
+
+  console.log('🚀 SNIPER MODE (ALL NEW TOKENS) INITIALIZED');
+  console.log(
+    `   Mode: ${cfg.dryRun ? '📄 DRY_RUN (NO RPC)' : '💰 LIVE'}`,
+  );
+  console.log(
+    `   TOKEN_AGE_LIMIT_SECONDS = ${cfg.tokenAgeLimitSeconds}`,
+  );
+  console.log(`   MIN_BUY_VOLUME_SOL      = ${cfg.minBuyVolumeSol}`);
+  console.log(`   MAX_TOKENS_PER_HOUR     = ${cfg.maxTokensPerHour}`);
+  console.log(`   POSITION_SIZE_SOL       = ${cfg.positionSizeSol}`);
+
+  ws = createSniperWebSocket();
+}
+
+// Al importar este módulo, solo se muestra un mensaje informativo.
+// El worker es quien debe llamar a startSniperMode().
 console.log('📡 SNIPER module loaded. Call startSniperMode() from worker.');
