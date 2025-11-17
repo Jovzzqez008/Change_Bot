@@ -102,7 +102,6 @@ function getTokenAgeSeconds(evt: NewTokenEvent): number {
     (typeof evt as any).launchTime ??
     null;
 
-  // Si no tenemos timestamp, asumimos que es "recién creado"
   if (!createdAt) return 0;
 
   const ms =
@@ -275,12 +274,12 @@ async function handleNewToken(evt: NewTokenEvent): Promise<void> {
     const fakeTokensAmount =
       entryPrice > 0 ? positionSizeSol / entryPrice : 0;
 
-    // ⚠️ openPosition en tu PositionManager espera 5–6 argumentos (no un objeto)
+    // ⬇️ Convertimos números a string para respetar la firma de openPosition
     await positionManager.openPosition(
       mint,
-      entryPrice,
-      positionSizeSol,
-      fakeTokensAmount,
+      entryPrice.toString(),
+      positionSizeSol.toString(),
+      fakeTokensAmount.toString(),
       'sniper',
       {
         executedDex: 'Pump.fun',
@@ -336,11 +335,12 @@ async function handleNewToken(evt: NewTokenEvent): Promise<void> {
     const entryPrice = buyResult.effectivePrice ?? 0;
     const tokensAmount = buyResult.tokensAmount ?? 0;
 
+    // ⬇️ Igual aquí: números → string
     await positionManager.openPosition(
       mint,
-      entryPrice,
-      positionSizeSol,
-      tokensAmount,
+      entryPrice.toString(),
+      positionSizeSol.toString(),
+      tokensAmount.toString(),
       'sniper',
       {
         executedDex: buyResult.executedDex ?? 'Pump.fun',
@@ -401,7 +401,6 @@ function createSniperWebSocket(): WebSocket {
         typeof data === 'string' ? data : data.toString();
       const parsed = JSON.parse(text);
 
-      // Normalizar el mensaje del WS (PumpPortal usa campos en PascalCase)
       const raw = parsed.token ?? parsed.data ?? parsed;
       const evt = normalizeNewTokenEvent(raw);
 
@@ -485,6 +484,4 @@ export async function startSniperMode(): Promise<void> {
   ws = createSniperWebSocket();
 }
 
-// Al importar este módulo, solo se muestra un mensaje informativo.
-// El worker es quien debe llamar a startSniperMode().
 console.log('📡 SNIPER module loaded. Call startSniperMode() from worker.');
