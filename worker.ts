@@ -1,4 +1,4 @@
-// worker.ts - Copy Trading Worker with ENV CLEANER + Graduation Monitor
+// worker.ts - Copy Trading Worker with ENV CLEANER + Graduation Monitor + SNIPER MODE
 import 'dotenv/config';
 import { cleanAndValidateEnv } from './envCleaner.js';
 import { isDryRunEnabled, ENABLE_AUTO_TRADING } from './environment.js';
@@ -10,6 +10,7 @@ const envCleaner: unknown = cleanAndValidateEnv();
 
 import { Redis as RedisClass } from 'ioredis';
 import type { Redis as RedisClient } from 'ioredis';
+import { startSniperMode } from './snipeNewTokens.js';
 
 let redisClient: RedisClient | null = null;
 
@@ -98,7 +99,7 @@ async function startWorker(): Promise<void> {
       );
     }
 
-    // 4. GraduationHandler: monitor automático de graduación
+    // 3. GraduationHandler: monitor automático de graduación
     try {
       const { GraduationHandler } = await import('./graduationHandler.js');
       const graduationHandler = new GraduationHandler();
@@ -112,13 +113,24 @@ async function startWorker(): Promise<void> {
       );
     }
 
-    // 5. Copy Monitor (ejecutor principal de copy trading)
+    // 4. Copy Monitor (ejecutor principal de copy trading)
     try {
       await import('./copyMonitor.js');
       console.log('✅ Copy Monitor started');
     } catch (e: any) {
       console.log(
         '❌ Copy Monitor failed to start:',
+        e?.message ?? String(e),
+      );
+    }
+
+    // 5. SNIPER MODE (ALL NEW TOKENS - Pump.fun)
+    try {
+      await startSniperMode();
+      console.log('✅ Sniper Mode initialized');
+    } catch (e: any) {
+      console.log(
+        '⚠️ Sniper Mode init failed:',
         e?.message ?? String(e),
       );
     }
