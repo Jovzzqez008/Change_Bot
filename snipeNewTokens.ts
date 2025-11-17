@@ -275,19 +275,17 @@ async function handleNewToken(evt: NewTokenEvent): Promise<void> {
       entryPrice > 0 ? positionSizeSol / entryPrice : 0;
 
     // ✅ Mantener entryPrice como number
-    await positionManager.openPosition(
+    await positionManager.registerOpenPosition({
       mint,
+      strategy: 'sniper',
       entryPrice,
-      positionSizeSol,
-      fakeTokensAmount,
-      'sniper',
-      {
-        executedDex: 'Pump.fun',
-        originalSignature: evt.signature ?? '',
-        walletName: 'SNIPER',
-        symbol: evt.symbol ?? '',
-      },
-    );
+      solAmount: positionSizeSol,
+      tokensAmount: fakeTokensAmount,
+      executedDex: 'Pump.fun',
+      originalSignature: evt.signature ?? '',
+      walletName: 'SNIPER',
+      symbol: evt.symbol ?? '',
+    });
 
     console.log(
       `🧪 SNIPER DRY-RUN BUY: ${positionSizeSol} SOL on ${mint} @ ${entryPrice.toFixed(
@@ -336,19 +334,18 @@ async function handleNewToken(evt: NewTokenEvent): Promise<void> {
     const tokensAmount = buyResult.tokensAmount ?? 0;
 
     // ✅ Mantener entryPrice como number
-    await positionManager.openPosition(
+    await positionManager.registerOpenPosition({
       mint,
+      strategy: 'sniper',
       entryPrice,
-      positionSizeSol,
+      solAmount: positionSizeSol,
       tokensAmount,
-      'sniper',
-      {
-        executedDex: buyResult.executedDex ?? 'Pump.fun',
-        originalSignature: buyResult.signature ?? evt.signature ?? '',
-        walletName: 'SNIPER',
-        symbol: evt.symbol ?? '',
-      },
-    );
+      executedDex: buyResult.executedDex ?? 'Pump.fun',
+      buySignature: buyResult.signature ?? undefined,
+      originalSignature: buyResult.signature ?? evt.signature ?? '',
+      walletName: 'SNIPER',
+      symbol: evt.symbol ?? '',
+    });
 
     console.log(
       `💸 SNIPER BUY EXECUTED: ${positionSizeSol} SOL on ${mint} @ ${entryPrice.toFixed(
